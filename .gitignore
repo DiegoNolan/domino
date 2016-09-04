@@ -1,0 +1,5 @@
+.ghci
+.stack-work/
+site_key.txt
+log/
+tmp/
