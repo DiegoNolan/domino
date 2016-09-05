@@ -1,26 +1,30 @@
 {-# LANGUAGE ExtendedDefaultRules,
+             FlexibleContexts,
              NoImplicitPrelude,
              OverloadedStrings,
-             FlexibleContexts,
+             RecordWildCards,
              TemplateHaskell #-}
 module Site
   ( app
   ) where
 
 import App
+import Asciify (decodeGSImage)
 import ClassyPrelude
+import Codec.Picture
 import Control.Lens
 import Domino.DoubleSix
-import Lucid
+import Domino.DoubleSix.Stats
+import Image
+import Lucid hiding (with)
 import Snap.Core
 import Snap.Util.FileServe
-import Snap.Http.Server
 import Snap.Snaplet
 import Snap.Snaplet.Auth
 import Snap.Snaplet.Auth.Backends.PostgresqlSimple
 import Snap.Snaplet.PostgresqlSimple
-import Snap.Snaplet.Session
 import Snap.Snaplet.Session.Backends.CookieSession
+import SnapUtil
 import System.FilePath.Posix
 import qualified Network.Wreq as Wreq
 
@@ -29,13 +33,25 @@ routes =
   [ ("/images", serveDirectory "static/images")
   , ("/", landingHandler)
   , ("/image", imageHandler)
+  , ("/rq/:imageId", newRqHandler)
   ]
+
+newRqHandler :: AppHandler ()
+newRqHandler = do
+  Just imgId <- getFromParam "imageId"
+  lucid $ masterPage $ do
+    bs <- toStrict <$> getImageBlob imgId
+    case decodeGSImage bs of
+      Right img -> renderStats $ getStats ( scaleDoubleSix img 40 )
+      Left er -> span_ $ toHtml er
+
 
 app :: SnapletInit App App
 app = makeSnaplet "domino website" description Nothing $ do
-    d <- nestSnaplet "" db $ pgsInit' $ pgsDefaultConfig "host=localhost port=5432 dbname=domino"
-    a <- nestSnaplet "" auth $ initPostgresAuth sess d
-    s <- nestSnaplet "" sess $ initCookieSessionManager "key" "domino-session" Nothing (Just (86400*14))
+    d <- nestSnaplet "pg-db" db $ pgsInit' $ pgsDefaultConfig "host=localhost port=5432 dbname=domino"
+    a <- nestSnaplet "auth" auth $ initPostgresAuth sess d
+    s <- nestSnaplet "sess" sess $ initCookieSessionManager "key" "domino-session"
+                                     Nothing (Just (86400*14))
 
     addRoutes routes
 
@@ -60,48 +76,50 @@ setCache action = do
 -}
 
 landingHandler :: AppHandler ()
-landingHandler =  method GET get
-  where
-    get = lucid $
-      html_ $ do
-        head_ $ do
-          return ()
-        body_ $ do
-          h2_ "hello"
-          form_ [ method_ "post", action_ "image" ] $ do
-            input_ [ name_ "url", type_ "text" ]
-            input_ [ type_ "submit", value_ "Submit" ]
+landingHandler = lucid $ masterPage $ do
+  h2_ "hello"
+  form_ [ method_ "post", action_ "image" ] $ do
+    input_ [ name_ "url", type_ "text" ]
+    input_ [ type_ "submit", value_ "Submit" ]
+
+masterPage :: Monad m => HtmlT m () -> HtmlT m ()
+masterPage inner =
+  html_ $ do
+    head_ $ do
+      link_ [ href_ "https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/3.3.7/css/bootstrap.css"
+            , rel_ "stylesheet"
+            ]
+    body_ $ do
+      inner
 
 imageHandler :: AppHandler ()
-imageHandler =
-  lucid $
-      html_ $ do
-        head_ $ do
-          link_ [ rel_ "https://cdnjs.cloudflare.com/ajax/libs/react-bootstrap/0.30.3/react-bootstrap.js"]
-        body_ $ do
-          mUrl <- lift $ getPostParam "url"
-          case mUrl of
-            Nothing -> span_ "Could not find"
-            Just url -> do
-              let stringUrl = unpack $ decodeUtf8 url
-                  fname = "tmp/" ++ takeFileName stringUrl
-              eImg <- liftIO $ do
-                r <- Wreq.get stringUrl
-                -- TODO: delete file
-                writeFile fname (r ^. Wreq.responseBody)
-                loadGSImage fname
-              case eImg of
-                Right img -> do
-                  let rows = scaleDoubleSix img 25
-                      counts = getCounts $ concat rows
-                  div_ [ class_ "row" ] $ do
-                    div_ [ class_ "col-md-10" ] $ do
-                      forM_ rows $ \row -> do
-                        div_ $ forM_ row $ \cell -> do
-                          doubleSixToHtml cell
-                    div_ [ class_ "col-md-2" ] $ do
-                      displayCounts counts
-                Left er -> span_ $ toHtml er
+imageHandler = method POST $ do
+  Just url <- getPostParam "url"
+  let stringUrl = unpack $ decodeUtf8 url
+  r <- liftIO $ Wreq.get stringUrl
+  let bs = r ^. Wreq.responseBody
+      ct = r ^. Wreq.responseHeader "Content-Type"
+  mImgId <- with db $ createImage (decodeUtf8 ct) bs
+  case mImgId of
+    -- TODO: better error handling
+    Nothing -> redirect "/"
+    Just imgId -> redirect ("/rq/" ++ encodeUtf8 (tshow imgId))
+
+renderStats :: Monad m => Stats -> HtmlT m ()
+renderStats Stats{..} =
+    div_ [ class_ "row" ] $ do
+      div_ [ class_ "col-md-8" ] $ do
+        forM_ dominoRows $ \row -> do
+          div_ $ forM_ row $ \cell -> do
+            doubleSixToHtml cell
+      div_ [ class_ "col-md-3" ] $ do
+        return ()
+      div_ [ class_ "col-md-2" ] $ do
+        displayCounts dominoCounts
+  where
+    renderPrice :: Monad m => HtmlT m ()
+    renderPrice = do
+      return ()
 
 displayCounts :: Monad m => [(DoubleSix, Int)] -> HtmlT m ()
 displayCounts counts = do
@@ -120,7 +138,7 @@ lucid response = do
 doubleSixToHtml :: Monad m => DoubleSix -> HtmlT m ()
 doubleSixToHtml (DoubleSix l r) =
     img_ [ src_ ("/images/double-six/" ++ sectionToWord l ++ "-" ++ sectionToWord r ++ ".png")
-         , style_ "width: 30px;"
+         , style_ "width: 25px;"
          ]
   where
     sectionToWord :: Section -> Text
@@ -132,8 +150,4 @@ doubleSixToHtml (DoubleSix l r) =
     sectionToWord One = "one"
     sectionToWord Blank = "blank"
 
-getCounts :: [DoubleSix] -> [(DoubleSix, Int)]
-getCounts doms = map (\lst@(x:_) -> (x, length lst)) grouped
-  where
-    order (DoubleSix a b) = if a < b then DoubleSix a b else DoubleSix b a
-    grouped = group $ sort (map order doms)
+

@@ -3,6 +3,7 @@
              OverloadedStrings #-}
 module Asciify
  ( loadGSImage
+ , decodeGSImage
  , novemAsciify
  , novemAsciify'
  , quadAsciify
@@ -11,6 +12,10 @@ module Asciify
  , scaleAsciify'
  , testAllAlgorithms
  , asciifyCells
+ , Quadrant(..)
+ , Novemant(..)
+ , Brightness(..)
+ , aShape
  ) where
 
 import ClassyPrelude
@@ -48,6 +53,9 @@ asciifyCells = intercalate "\n"
 widthToHeight:: Rational
 widthToHeight = 3/2
 
+decodeGSImage :: ByteString -> Either String (Image Pixel8)
+decodeGSImage bs = grayscaleImage <$> decodeImage bs
+
 loadGSImage :: String -> IO (Either String (Image Pixel8))
 loadGSImage fname = do
    dy <- readImage fname
@@ -79,8 +87,8 @@ runner img chsWide f = reverse $ foldl' (\acc j -> row j : acc) [] [0..chsHigh]
 novemAsciify :: Image Pixel8 -> Int -> String
 novemAsciify img chsWide = asciifyCells $ novemAsciify' img chsWide nShapeToAscii
 
-novemAsciify' :: Image Pixel8 -> Int -> (NovemShape -> a) -> [[a]]
-novemAsciify' img chsWide f = runner img chsWide (\i tl br -> f (nShape i tl br))
+novemAsciify' :: Image Pixel8 -> Int -> (Novemant -> a) -> [[a]]
+novemAsciify' img chsWide f = runner img chsWide (\i tl br -> f (novShape $ nShape i tl br))
 
 quadAsciify :: Image Pixel8 -> Int -> String
 quadAsciify img chsWide = asciifyCells $ quadAsciify' img chsWide shapeToAscii
@@ -162,8 +170,8 @@ shapeToAscii = aSToA . aShape
 aShape :: CharShape -> (Quadrant,Quadrant,Quadrant,Quadrant)
 aShape (a,b,c,d) = (approx a,approx b,approx c,approx d)
 
-nShapeToAscii :: NovemShape -> Char
-nShapeToAscii = bestMatch allChars . novShape
+nShapeToAscii :: Novemant -> Char
+nShapeToAscii = bestMatch allChars
 
 allChars :: [Char]
 allChars = map chr [32..126]

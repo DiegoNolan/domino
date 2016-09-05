@@ -15,21 +15,30 @@ Executable domino
   main-is: Main.hs
 
   Build-depends:
-    base,
-    bytestring,
-    classy-prelude,
-    filepath,
-    JuicyPixels,
-    lens,
-    lucid,
-    MonadCatchIO-transformers,
-    mtl,
-    snap,
-    snap-core,
-    snap-server,
-    snaplet-postgresql-simple,
-    vector,
-    wreq
+                adjunctions,
+                amazonka,
+                amazonka-core,
+                amazonka-s3,
+                amazonka-ses,
+                base,
+                bytestring,
+                classy-prelude,
+                conduit,
+                conduit-extra,
+                filepath,
+                JuicyPixels,
+                lens,
+                lucid,
+                MonadCatchIO-transformers,
+                mtl,
+                postgresql-simple,
+                resourcet,
+                snap,
+                snap-core,
+                snap-server,
+                snaplet-postgresql-simple,
+                vector,
+                wreq
 
   if impl(ghc >= 6.12.0)
     ghc-options: -threaded -Wall -fwarn-tabs -funbox-strict-fields -O2

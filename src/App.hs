@@ -3,6 +3,7 @@
              TemplateHaskell #-}
 module App where
 
+import ClassyPrelude
 import Control.Lens
 import Snap.Snaplet
 import Snap.Snaplet.Auth
@@ -18,4 +19,3 @@ data App = App
 makeLenses ''App
 
 type AppHandler = Handler App App
-
