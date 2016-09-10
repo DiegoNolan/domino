@@ -8,6 +8,7 @@ module Site
   ( app
   ) where
 
+import Api
 import App
 import Asciify (decodeGSImage)
 import ClassyPrelude
@@ -17,6 +18,7 @@ import Domino.DoubleSix
 import Domino.DoubleSix.Stats
 import Image
 import Lucid hiding (with)
+import Servant hiding (serveDirectory, POST, addHeader)
 import Snap.Core
 import Snap.Util.FileServe
 import Snap.Snaplet
@@ -27,6 +29,9 @@ import Snap.Snaplet.Session.Backends.CookieSession
 import SnapUtil
 import System.FilePath.Posix
 import qualified Network.Wreq as Wreq
+
+api :: Servant.Proxy (Api AppHandler)
+api = Servant.Proxy
 
 routes :: [(ByteString, AppHandler ())]
 routes =
@@ -42,9 +47,16 @@ newRqHandler = do
   lucid $ masterPage $ do
     bs <- toStrict <$> getImageBlob imgId
     case decodeGSImage bs of
-      Right img -> renderStats $ getStats ( scaleDoubleSix img 40 )
+      Right img -> renderStats $ getStats ( novemDoubleSix img 30 )
       Left er -> span_ $ toHtml er
 
+apiServer :: Servant.Server (Api AppHandler) AppHandler
+apiServer =
+       undefined
+  :<|> undefined
+
+-- servantApp :: Application AppHandler
+servantApp = serve api apiServer
 
 app :: SnapletInit App App
 app = makeSnaplet "domino website" description Nothing $ do

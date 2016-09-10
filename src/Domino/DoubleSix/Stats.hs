@@ -1,12 +1,15 @@
 {-# LANGUAGE NoImplicitPrelude,
              LambdaCase,
-             OverloadedStrings #-}
+             OverloadedStrings,
+             TemplateHaskell #-}
 module Domino.DoubleSix.Stats
  ( Stats(..)
  , getStats
  ) where
 
 import ClassyPrelude
+import Data.Aeson
+import Data.Aeson.TH
 import Domino.DoubleSix
 
 -- In inches
@@ -58,3 +61,5 @@ getCounts doms = map (\lst@(x:_) -> (x, length lst)) grouped
   where
     order (DoubleSix a b) = if a < b then DoubleSix a b else DoubleSix b a
     grouped = group $ sort (map order doms)
+
+$(deriveJSON defaultOptions ''Stats)

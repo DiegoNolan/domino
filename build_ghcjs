@@ -1,0 +1,5 @@
+#!/bin/bash
+
+stack build --stack-yaml=ghcjs/stack.yaml
+
+ccjs $(stack path --stack-yaml=ghcjs/stack.yaml --local-install-root)/bin/create.jsexe/all.js --compilation_level=ADVANCED_OPTIMIZATIONS --externs=node > static/ghcjs/create.js

@@ -1,6 +1,7 @@
 {-# LANGUAGE NoImplicitPrelude,
              LambdaCase,
-             OverloadedStrings #-}
+             OverloadedStrings,
+             TemplateHaskell #-}
 module Domino.DoubleSix
  ( DoubleSix(..)
  , Section(..)
@@ -13,6 +14,8 @@ import ClassyPrelude
 import Asciify hiding (Blank)
 import qualified Asciify as A
 import Codec.Picture
+import Data.Aeson
+import Data.Aeson.TH
 
 data DoubleSix = DoubleSix
   { left :: Section
@@ -86,3 +89,6 @@ brightNessToInt Bnk = 3
 brightNessToInt Lgt = 2
 brightNessToInt Drk = 1
 brightNessToInt Bck = 0
+
+$(deriveJSON defaultOptions ''Section)
+$(deriveJSON defaultOptions ''DoubleSix)
