@@ -2,7 +2,7 @@
              LambdaCase,
              OverloadedStrings,
              TemplateHaskell #-}
-module Domino.DoubleSix.Stats
+module Shared.Domino.DoubleSix.Stats
  ( Stats(..)
  , getStats
  ) where
@@ -10,7 +10,7 @@ module Domino.DoubleSix.Stats
 import ClassyPrelude
 import Data.Aeson
 import Data.Aeson.TH
-import Domino.DoubleSix
+import Shared.Domino.DoubleSix
 
 -- In inches
 dominoWidth :: Double

@@ -2,35 +2,16 @@
              LambdaCase,
              OverloadedStrings,
              TemplateHaskell #-}
-module Domino.DoubleSix
- ( DoubleSix(..)
- , Section(..)
- , loadGSImage
- , scaleDoubleSix
- , novemDoubleSix
- ) where
+module DoubleSix
+  ( scaleDoubleSix
+  , novemDoubleSix
+  ) where
 
 import ClassyPrelude
 import Asciify hiding (Blank)
 import qualified Asciify as A
 import Codec.Picture
-import Data.Aeson
-import Data.Aeson.TH
-
-data DoubleSix = DoubleSix
-  { left :: Section
-  , right :: Section
-  } deriving (Eq, Show, Ord)
-
-data Section =
-    Blank
-  | One
-  | Two
-  | Three
-  | Four
-  | Five
-  | Six deriving (Eq, Show, Ord)
-
+import Shared.Domino.DoubleSix
 
 scaleDoubleSix :: Image Pixel8 -> Int -> [[DoubleSix]]
 scaleDoubleSix img chsWide = scaleAsciify' img chsWide scaleMapping
@@ -90,5 +71,4 @@ brightNessToInt Lgt = 2
 brightNessToInt Drk = 1
 brightNessToInt Bck = 0
 
-$(deriveJSON defaultOptions ''Section)
-$(deriveJSON defaultOptions ''DoubleSix)
+

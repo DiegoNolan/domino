@@ -1,6 +1,7 @@
 module Main where
 
-import Lib
+import CreateWidget
+
 
 main :: IO ()
-main = someFunc
+main = app

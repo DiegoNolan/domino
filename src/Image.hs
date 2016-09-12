@@ -3,8 +3,8 @@
              RecordWildCards #-}
 module Image
   ( Image
+  , ImageId (..)
   , createImage
-  , imageUrl
   , getImage
   , getImageBlob
   ) where
@@ -20,7 +20,7 @@ import Snap.Snaplet.AWS
 import Snap.Snaplet.PostgresqlSimple
 import SnapUtil
 
-newtype ImageId = ImageId Int
+newtype ImageId = ImageId {unImageId :: Int }
 
 instance Show ImageId where
   show (ImageId i) = show i
@@ -60,9 +60,6 @@ createImage contentType contents = do
       Just iId -> liftIO $ do
         putFile dominoBucketName (S3.ObjectKey $ tshow iId) contentType contents
         return $ Just iId
-
-imageUrl :: ImageId -> Text
-imageUrl imgId = "test"
 
 getImage :: HasPostgres m => ImageId -> m (Maybe Image)
 getImage imgId =

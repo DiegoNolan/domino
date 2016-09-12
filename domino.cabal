@@ -33,7 +33,7 @@ Executable domino
                 mtl,
                 postgresql-simple,
                 resourcet,
-                servant,
+                servant >= 0.7,
                 servant-snap,
                 snap,
                 snap-core,

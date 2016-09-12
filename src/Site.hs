@@ -8,17 +8,20 @@ module Site
   ( app
   ) where
 
-import Api
 import App
 import Asciify (decodeGSImage)
 import ClassyPrelude
 import Codec.Picture
 import Control.Lens
-import Domino.DoubleSix
-import Domino.DoubleSix.Stats
+import qualified Data.Text as Text
+import DoubleSix
 import Image
 import Lucid hiding (with)
 import Servant hiding (serveDirectory, POST, addHeader)
+import Servant.Server.Internal.SnapShims
+import Shared.Api
+import Shared.Domino.DoubleSix
+import Shared.Domino.DoubleSix.Stats
 import Snap.Core
 import Snap.Util.FileServe
 import Snap.Snaplet
@@ -30,14 +33,13 @@ import SnapUtil
 import System.FilePath.Posix
 import qualified Network.Wreq as Wreq
 
-api :: Servant.Proxy (Api AppHandler)
+api :: Servant.Proxy Api
 api = Servant.Proxy
 
 routes :: [(ByteString, AppHandler ())]
 routes =
-  [ ("/images", serveDirectory "static/images")
+  [ ("/js", serveDirectory "static/ghcjs")
   , ("/", landingHandler)
-  , ("/image", imageHandler)
   , ("/rq/:imageId", newRqHandler)
   ]
 
@@ -50,10 +52,10 @@ newRqHandler = do
       Right img -> renderStats $ getStats ( novemDoubleSix img 30 )
       Left er -> span_ $ toHtml er
 
-apiServer :: Servant.Server (Api AppHandler) AppHandler
+apiServer :: Servant.Server Api AppHandler
 apiServer =
-       undefined
-  :<|> undefined
+       newImageHandler
+  :<|> getStatsHandler
 
 -- servantApp :: Application AppHandler
 servantApp = serve api apiServer
@@ -65,7 +67,7 @@ app = makeSnaplet "domino website" description Nothing $ do
     s <- nestSnaplet "sess" sess $ initCookieSessionManager "key" "domino-session"
                                      Nothing (Just (86400*14))
 
-    addRoutes routes
+    addRoutes $ routes ++ [("api", applicationToSnap servantApp)]
 
     return $ App s a d
   where
@@ -89,10 +91,8 @@ setCache action = do
 
 landingHandler :: AppHandler ()
 landingHandler = lucid $ masterPage $ do
-  h2_ "hello"
-  form_ [ method_ "post", action_ "image" ] $ do
-    input_ [ name_ "url", type_ "text" ]
-    input_ [ type_ "submit", value_ "Submit" ]
+  div_ [ id_ "create" ] ""
+  script_ [ src_ "/js/create.js" ] ""
 
 masterPage :: Monad m => HtmlT m () -> HtmlT m ()
 masterPage inner =
@@ -104,18 +104,28 @@ masterPage inner =
     body_ $ do
       inner
 
-imageHandler :: AppHandler ()
-imageHandler = method POST $ do
-  Just url <- getPostParam "url"
-  let stringUrl = unpack $ decodeUtf8 url
+newImageHandler :: Maybe Text -> AppHandler Int
+newImageHandler mUrl = do
+  print mUrl
+  Just url <- return mUrl
+  let stringUrl = unpack (Text.strip url)
   r <- liftIO $ Wreq.get stringUrl
   let bs = r ^. Wreq.responseBody
       ct = r ^. Wreq.responseHeader "Content-Type"
   mImgId <- with db $ createImage (decodeUtf8 ct) bs
   case mImgId of
-    -- TODO: better error handling
-    Nothing -> redirect "/"
-    Just imgId -> redirect ("/rq/" ++ encodeUtf8 (tshow imgId))
+    Nothing -> do logError "Error creating image"
+                  finishWith (emptyResponse & setResponseCode 500)
+    Just imgId -> return $ unImageId imgId
+
+getStatsHandler :: Int -> AppHandler Stats
+getStatsHandler i = do
+  let imgId = ImageId i
+  bs <- toStrict <$> getImageBlob imgId
+  case decodeGSImage bs of
+    Right img -> return $ getStats ( novemDoubleSix img 30 )
+    Left er -> do logError $ encodeUtf8 $ pack ("Error decoding image : " ++ er)
+                  finishWith (emptyResponse & setResponseCode 500)
 
 renderStats :: Monad m => Stats -> HtmlT m ()
 renderStats Stats{..} =

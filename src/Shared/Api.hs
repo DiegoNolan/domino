@@ -6,13 +6,12 @@
 {-# LANGUAGE TypeFamilies      #-}
 {-# LANGUAGE TypeOperators     #-}
 {-# LANGUAGE TemplateHaskell   #-}
-module Api where
+module Shared.Api where
 
-import Control.Lens
 import ClassyPrelude
-import Domino.DoubleSix.Stats
-import Servant
+import Servant.API
+import Shared.Domino.DoubleSix.Stats
 
-type Api m =
+type Api =
        "new-image" :> QueryParam "url" Text :> Post '[JSON] Int
-  :<|> "get-stats" :> QueryParam "image-id" Int :> Post '[JSON] Stats
+  :<|> "get-stats" :> Capture "image-id" Int :> Get '[JSON] Stats
