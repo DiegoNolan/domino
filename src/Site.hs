@@ -42,17 +42,7 @@ routes :: [(ByteString, AppHandler ())]
 routes =
   [ ("/js", serveDirectory "static/ghcjs")
   , ("/", landingHandler)
-  , ("/rq/:imageId", newRqHandler)
   ]
-
-newRqHandler :: AppHandler ()
-newRqHandler = do
-  Just imgId <- getFromParam "imageId"
-  lucid $ masterPage $ do
-    bs <- toStrict <$> with aws (getImageBlob imgId)
-    case decodeGSImage bs of
-      Right img -> renderStats $ getStats ( novemDoubleSix img 30 )
-      Left er -> span_ $ toHtml er
 
 apiServer :: Servant.Server Api AppHandler
 apiServer =
@@ -116,7 +106,7 @@ newImageHandler mUrl = do
   r <- liftIO $ Wreq.get stringUrl
   let bs = r ^. Wreq.responseBody
       ct = r ^. Wreq.responseHeader "Content-Type"
-  mImgId <- with db $ createImage (decodeUtf8 ct) bs
+  mImgId <- createImage (decodeUtf8 ct) bs
   case mImgId of
     Nothing -> do logError "Error creating image"
                   finishWith (emptyResponse & setResponseCode 500)
