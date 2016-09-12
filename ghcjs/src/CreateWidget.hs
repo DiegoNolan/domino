@@ -2,7 +2,10 @@
              NoImplicitPrelude,
              LambdaCase,
              RecursiveDo,
+             RecordWildCards,
+             ScopedTypeVariables,
              RankNTypes #-}
+{-# LANGUAGE PartialTypeSignatures #-}
 module CreateWidget
   ( app
   ) where
@@ -18,7 +21,6 @@ import qualified Data.Map as Map
 import JavaScript.Web.Location
 import Reflex
 import Reflex.Dom
-import Reflex.Dom.Widget.Resize
 import Reflex.Host.Class
 import Servant.API
 import Servant.Reflex
@@ -51,36 +53,6 @@ handleResult _ (Just (RequestFailure e)) = do
   return Nothing
 handleResult _ _ = return Nothing
 
-statsWidget :: MonadWidget t m => Int -> Stats -> m ()
-statsWidget imgId stats = mdo
-  elClass "div" "row" $ mdo
-    (e,(resizeEvent,_)) <- elAttr' "div" ("class" =: "col-xs-10") $ resizeDetector $ do
-      renderDominos width (dominoRows stats)
-      elAttr "img" (Map.fromList
-                    [ ("src", imageUrl imgId)
-                    , ("style", "width: 100%")
-                    ]
-                   ) (return ())
-    elClass "div" "col-xs-2" $ do
-      renderCounts (dominoCounts stats)
-    buildEvent <- getPostBuild
-    widthEv <- performEvent $ const (getClientWidth (_el_element e)) <$>
-               leftmost [ resizeEvent, buildEvent ]
-    width <- foldDyn (\v _ -> v - 40) 700 widthEv
-    return ()
-
-
-newImageWidget :: MonadWidget t m => Int -> m ()
-newImageWidget i = do
-  let ( newImage :<|> getStats ) = client (Proxy :: Proxy Api)
-                                          (Proxy :: MonadWidget t m => Proxy m)
-                                          (constDyn (BasePath "/api"))
-  buildEv <- getPostBuild
-  result <- getStats (constant (Right i)) (tag (constant ()) buildEv)
-  resultDyn <- holdDyn Nothing (Just <$> result)
-  dyn =<< handleResult (statsWidget i) `mapDyn` resultDyn
-  return ()
-
 createWidget :: forall t m. MonadWidget t m => m ()
 createWidget = do
   let ( newImage :<|> getStats ) = client (Proxy :: Proxy Api)
@@ -98,27 +70,109 @@ createWidget = do
 
   return ()
 
+newImageWidget :: MonadWidget t m => Int -> m ()
+newImageWidget i = do
+  let ( newImage :<|> getStats ) = client (Proxy :: Proxy Api)
+                                          (Proxy :: MonadWidget t m => Proxy m)
+                                          (constDyn (BasePath "/api"))
+  buildEv <- getPostBuild
+  result <- getStats (constant (Right i)) (tag (constant ()) buildEv)
+  resultDyn <- holdDyn Nothing (Just <$> result)
+  artOptionsRenderEvent <- dyn =<< handleResult (dominoArtWidget i) `mapDyn` resultDyn
+  let a = artOptionsRenderEvent :: Event _ (Maybe (Dynamic _ ArtOptions))
+  return ()
+
+dominoArtWidget :: MonadWidget t m => Int -> Stats -> m (Dynamic t ArtOptions)
+dominoArtWidget imgId stats = mdo
+  elClass "div" "row" $ mdo
+    elClass "div" "col-xs-9" $ do
+      renderDominos (dominoRows stats)
+      elAttr "img" (Map.fromList
+                    [ ("src", imageUrl imgId)
+                    , ("style", "width: 100%")
+                    ]
+                   ) (return ())
+    elClass "div" "col-xs-3" $ do
+      artOptions <- artOptionsWidget
+      renderStasBar stats
+      return artOptions
+
+data ArtOptions = ArtOptions
+  { targetWidth :: Double
+  }
+
+defaultArtOptions :: ArtOptions
+defaultArtOptions =
+  ArtOptions
+    { targetWidth = 3
+    }
+
+artOptionsWidget :: MonadWidget t m => m (Dynamic t ArtOptions)
+artOptionsWidget = do
+  (textValue, submitEv) <- elClass "div" "col-sm-6 col-xs-12" $ do
+    elClass "div" "input-group" $ do
+      tValue <- textInput $ def
+                  & textInputConfig_attributes .~ constDyn ("class" =: "form-control")
+                  & textInputConfig_initialValue .~ "3"
+      (submitEl, _) <- elClass "div" "input-group-btn" $ do
+        elAttr' "button" ("class" =: "btn btn-default") (text "Update")
+      return $ (tValue, domEvent Click submitEl)
+  let enterEvent = ffilter (== 13) (_textInput_keyup textValue)
+      valueEvent = tagDyn (_textInput_value textValue)
+                       (leftmost [ tag (constant ()) enterEvent, submitEv ])
+  holdDyn defaultArtOptions (ArtOptions <$> fmapMaybe readMay valueEvent)
+
+renderStasBar :: MonadWidget t m => Stats -> m ()
+renderStasBar Stats{..} = do
+    elClass "div" "row" $ do
+      elClass "div" "col-xs-12 center-text" $ el "h3" (text "Info")
+
+    elClass "div" "row" $ do
+      elClass "div" "col-xs-12" $ do
+        let (w,h) = physicalDimensions
+        text $ feetToReadable w ++ " by " ++ feetToReadable h
+
+    elClass "div" "row" $ do
+      elClass "div" "col-xs-12" $ text (show totalDominoes ++ " Total Dominoes")
+
+    elClass "div" "row" $ do
+      elClass "div" "col-xs-12" $ renderCounts dominoCounts
+  where
+    feetToReadable :: Double -> String
+    feetToReadable d = show f ++ "' " ++ show inches ++ "\""
+      where
+        sixInFoot = 12 * 16
+        sixteenths = round (d * fromIntegral sixInFoot) :: Int
+        (f, sixs) = divMod sixteenths sixInFoot
+        (inches, _) = divMod sixs 16
+
+
 displayInt :: MonadWidget t m => Dynamic t Int -> m ()
 displayInt = display
 
-renderDominos :: MonadWidget t m => Dynamic t Double -> [[DoubleSix]] -> m ()
-renderDominos fullWidth rows = do
-    dynDominoWidth <- mapDyn (\w -> w / count) fullWidth
-    forM_ rows $ \row -> el "div" (renderRows dynDominoWidth row)
+renderDominos :: MonadWidget t m => [[DoubleSix]] -> m ()
+renderDominos rs = forM_ rs $ \row -> el "div" (renderRows row)
   where
-    count = fromIntegral $ length (headEx rows)
-    renderRows :: MonadWidget t m => Dynamic t Double -> [DoubleSix] -> m ()
-    renderRows w row = forM_ row (renderDoubleSix w)
+    cnt = fromIntegral $ length (headEx rs) :: Double
+    renderRows :: MonadWidget t m => [DoubleSix] -> m ()
+    renderRows r = forM_ r (renderDoubleSix (Percentage (100 / cnt)))
 
-renderDoubleSix :: MonadWidget t m => String -> DoubleSix -> m ()
-renderDoubleSix (DoubleSix l r) =
+data DominoSize =
+    Percentage Double
+  | Fixed Double
+
+renderDoubleSix :: MonadWidget t m => DominoSize -> DoubleSix -> m ()
+renderDoubleSix ds (DoubleSix l r) =
     elAttr "img" (Map.fromList
                   [ ("src", "/images/double-six/" ++ unpack (sectionToWord l) ++ "-" ++
                       unpack (sectionToWord r) ++ ".png")
-                  , ("style", "width: 3.33333%")
+                  , ("style", "width: " ++ width)
                   ]
                  ) (return ())
   where
+    width = case ds of
+              Percentage d -> show d ++ "%"
+              Fixed d -> show d ++ "px"
     sectionToWord :: Section -> Text
     sectionToWord Six = "six"
     sectionToWord Five = "five"
@@ -130,9 +184,12 @@ renderDoubleSix (DoubleSix l r) =
 
 renderCounts :: MonadWidget t m => [(DoubleSix, Int)] -> m ()
 renderCounts counts = do
-  forM_ counts $ \(ds, amount) -> do
-    renderDoubleSix (constDyn 40) ds
-    el "span" (text $ show amount)
+  el "table" $ do
+    el "tbody" $ do
+      forM_ counts $ \(ds, amount) ->
+        el "tr" $ do
+          el "td" (text $ show amount)
+          el "td" $ renderDoubleSix (Fixed 70) ds
 
 inputOnEnter :: MonadWidget t m => m (Dynamic t String)
 inputOnEnter =
