@@ -46,7 +46,8 @@ instance ToRow Image where
 instance FromRow Image where
   fromRow = Image <$> field <*> field <*> field
 
-createImage :: (Monad m, HasPostgres m) => Text -> LByteString -> m (Maybe ImageId)
+createImage :: (HasPostgres m, HasAWS m)
+            => Text -> LByteString -> m (Maybe ImageId)
 createImage contentType contents = do
   now <- liftIO getCurrentTime
   let img = Image (ImageId 0) contentType now
@@ -57,7 +58,7 @@ createImage contentType contents = do
                  \returning id" img
     case onlySingle mId of
       Nothing -> return Nothing
-      Just iId -> liftIO $ do
+      Just iId -> do
         putFile dominoBucketName (S3.ObjectKey $ tshow iId) contentType contents
         return $ Just iId
 
@@ -65,8 +66,8 @@ getImage :: HasPostgres m => ImageId -> m (Maybe Image)
 getImage imgId =
   single <$> query "select id, conent_type, created_at where id = (?)" (Only imgId)
 
-getImageBlob :: MonadIO m => ImageId -> m LByteString
-getImageBlob imgId = liftIO $ getFile dominoBucketName (S3.ObjectKey $ tshow imgId)
+getImageBlob :: HasAWS m => ImageId -> m LByteString
+getImageBlob imgId = getFile dominoBucketName (S3.ObjectKey $ tshow imgId)
 
 single :: [a]-> Maybe a
 single [x] = Just x

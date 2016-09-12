@@ -17,6 +17,7 @@ import qualified Data.Text as Text
 import DoubleSix
 import Image
 import Lucid hiding (with)
+import Network.AWS
 import Servant hiding (serveDirectory, POST, addHeader)
 import Servant.Server.Internal.SnapShims
 import Shared.Api
@@ -27,6 +28,7 @@ import Snap.Util.FileServe
 import Snap.Snaplet
 import Snap.Snaplet.Auth
 import Snap.Snaplet.Auth.Backends.PostgresqlSimple
+import Snap.Snaplet.AWS
 import Snap.Snaplet.PostgresqlSimple
 import Snap.Snaplet.Session.Backends.CookieSession
 import SnapUtil
@@ -47,7 +49,7 @@ newRqHandler :: AppHandler ()
 newRqHandler = do
   Just imgId <- getFromParam "imageId"
   lucid $ masterPage $ do
-    bs <- toStrict <$> getImageBlob imgId
+    bs <- toStrict <$> with aws (getImageBlob imgId)
     case decodeGSImage bs of
       Right img -> renderStats $ getStats ( novemDoubleSix img 30 )
       Left er -> span_ $ toHtml er
@@ -66,10 +68,12 @@ app = makeSnaplet "domino website" description Nothing $ do
     a <- nestSnaplet "auth" auth $ initPostgresAuth sess d
     s <- nestSnaplet "sess" sess $ initCookieSessionManager "key" "domino-session"
                                      Nothing (Just (86400*14))
+    env <- liftIO $ newEnv Oregon Discover
+    am <- nestSnaplet "aws" aws $ awsInit env
 
     addRoutes $ routes ++ [("api", applicationToSnap servantApp)]
 
-    return $ App s a d
+    return $ App s a d am
   where
     description = "A website for setting domino art"
 
