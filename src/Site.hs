@@ -41,6 +41,7 @@ api = Servant.Proxy
 routes :: [(ByteString, AppHandler ())]
 routes =
   [ ("/js", serveDirectory "static/ghcjs")
+  , ("/images", serveDirectory "static/images")
   , ("/", landingHandler)
   ]
 
@@ -112,12 +113,14 @@ newImageHandler mUrl = do
                   finishWith (emptyResponse & setResponseCode 500)
     Just imgId -> return $ unImageId imgId
 
-getStatsHandler :: Int -> AppHandler Stats
-getStatsHandler i = do
+getStatsHandler :: Maybe Int -> Maybe Double -> AppHandler Stats
+getStatsHandler mi mw = do
+  Just i <- return mi
+  Just w <- return mw
   let imgId = ImageId i
   bs <- toStrict <$> getImageBlob imgId
   case decodeGSImage bs of
-    Right img -> return $ getStats ( novemDoubleSix img 30 )
+    Right img -> return $ getStats ( scaleDoubleSix img (desiredWidthToCount (w * 12) ) )
     Left er -> do logError $ encodeUtf8 $ pack ("Error decoding image : " ++ er)
                   finishWith (emptyResponse & setResponseCode 500)
 

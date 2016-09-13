@@ -5,12 +5,16 @@
 module Shared.Domino.DoubleSix.Stats
  ( Stats(..)
  , getStats
+ , desiredWidthToCount
  ) where
 
 import ClassyPrelude
 import Data.Aeson
 import Data.Aeson.TH
 import Shared.Domino.DoubleSix
+
+desiredWidthToCount :: Double -> Int
+desiredWidthToCount w = round $ w / dominoWidth
 
 -- In inches
 dominoWidth :: Double

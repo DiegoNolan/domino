@@ -53,38 +53,64 @@ handleResult _ (Just (RequestFailure e)) = do
   return Nothing
 handleResult _ _ = return Nothing
 
+data CreationFlow =
+    NoUrl
+  | NewUrl String
+  | NewImage Int ArtOptions
+  | DisplayStats Int Stats ArtOptions
+  | FetchFailure String
+
 createWidget :: forall t m. MonadWidget t m => m ()
-createWidget = do
-  let ( newImage :<|> getStats ) = client (Proxy :: Proxy Api)
-                                          (Proxy :: MonadWidget t m => Proxy m)
-                                          (constDyn (BasePath "/api"))
+createWidget = mdo
+  dynEventStream <- widgetHold newUrlWidget (creationFlowWidgetMapper <$> widgetEvents)
+  let widgetEvents = switchPromptlyDyn dynEventStream
+  return ()
 
+creationFlowWidgetMapper :: MonadWidget t m => CreationFlow -> m (Event t CreationFlow)
+creationFlowWidgetMapper NoUrl = newUrlWidget
+creationFlowWidgetMapper (NewUrl url) = fetchImageWidget (pack url)
+creationFlowWidgetMapper (NewImage i w) = fetchStatsWidget i w
+creationFlowWidgetMapper (DisplayStats i stats ao) = dominoArtWidget i stats ao
+creationFlowWidgetMapper (FetchFailure s) = do
+  text ("Fetch failure : " ++ s)
+  return never
 
+newUrlWidget :: MonadWidget t m => m (Event t CreationFlow)
+newUrlWidget = do
   urlDyn <- inputOnEnter
+  return $ NewUrl <$> updated urlDyn
 
-  -- TODO: Fix this. It is stupid
-  createImageEv <- delay 0.1 (tag (constant ()) (updated urlDyn))
-  newImageRq <- newImage (Right . pack <$> current urlDyn) createImageEv
-  newImageRqDyn <- holdDyn Nothing (Just <$> newImageRq)
-  dyn =<< handleResult newImageWidget `mapDyn` newImageRqDyn
+fetchImageWidget :: MonadWidget t m => Text -> m (Event t CreationFlow)
+fetchImageWidget url = do
+  let ( newImage :<|> _ ) = client (Proxy :: Proxy Api)
+                                   (Proxy :: MonadWidget t m => Proxy m)
+                                   (constDyn (BasePath "/api"))
+  postBuild <- getPostBuild
+  reqResult <- newImage (constant (Right url)) postBuild
+  text "Fetching Image"
+  return $ (\case
+               ResponseSuccess i _ -> NewImage i defaultArtOptions
+               ResponseFailure e _ -> FetchFailure e
+               RequestFailure e    -> FetchFailure e
+           ) <$> reqResult
 
-  return ()
+fetchStatsWidget :: MonadWidget t m => Int -> ArtOptions -> m (Event t CreationFlow)
+fetchStatsWidget i (ao@ArtOptions{..}) = do
+  let ( _ :<|> getStats ) = client (Proxy :: Proxy Api)
+                                   (Proxy :: MonadWidget t m => Proxy m)
+                                   (constDyn (BasePath "/api"))
+  postBuild <- getPostBuild
+  reqResult <- getStats (constant (Right i)) (constant (Right targetWidth)) postBuild
+  text "Processing Results"
+  return $ (\case
+               ResponseSuccess s _ -> DisplayStats i s ao
+               ResponseFailure e _ -> FetchFailure e
+               RequestFailure e    -> FetchFailure e
+           ) <$> reqResult
 
-newImageWidget :: MonadWidget t m => Int -> m ()
-newImageWidget i = do
-  let ( newImage :<|> getStats ) = client (Proxy :: Proxy Api)
-                                          (Proxy :: MonadWidget t m => Proxy m)
-                                          (constDyn (BasePath "/api"))
-  buildEv <- getPostBuild
-  result <- getStats (constant (Right i)) (tag (constant ()) buildEv)
-  resultDyn <- holdDyn Nothing (Just <$> result)
-  artOptionsRenderEvent <- dyn =<< handleResult (dominoArtWidget i) `mapDyn` resultDyn
-  let a = artOptionsRenderEvent :: Event _ (Maybe (Dynamic _ ArtOptions))
-  return ()
-
-dominoArtWidget :: MonadWidget t m => Int -> Stats -> m (Dynamic t ArtOptions)
-dominoArtWidget imgId stats = mdo
-  elClass "div" "row" $ mdo
+dominoArtWidget :: MonadWidget t m => Int -> Stats -> ArtOptions -> m (Event t CreationFlow)
+dominoArtWidget imgId stats initArtOptions = mdo
+  artOptions <- elClass "div" "row" $ mdo
     elClass "div" "col-xs-9" $ do
       renderDominos (dominoRows stats)
       elAttr "img" (Map.fromList
@@ -93,9 +119,10 @@ dominoArtWidget imgId stats = mdo
                     ]
                    ) (return ())
     elClass "div" "col-xs-3" $ do
-      artOptions <- artOptionsWidget
+      ao <- artOptionsWidget initArtOptions
       renderStasBar stats
-      return artOptions
+      return ao
+  return $ NewImage imgId <$> updated artOptions
 
 data ArtOptions = ArtOptions
   { targetWidth :: Double
@@ -107,13 +134,13 @@ defaultArtOptions =
     { targetWidth = 3
     }
 
-artOptionsWidget :: MonadWidget t m => m (Dynamic t ArtOptions)
-artOptionsWidget = do
+artOptionsWidget :: MonadWidget t m => ArtOptions -> m (Dynamic t ArtOptions)
+artOptionsWidget ArtOptions{..} = do
   (textValue, submitEv) <- elClass "div" "col-sm-6 col-xs-12" $ do
     elClass "div" "input-group" $ do
       tValue <- textInput $ def
                   & textInputConfig_attributes .~ constDyn ("class" =: "form-control")
-                  & textInputConfig_initialValue .~ "3"
+                  & textInputConfig_initialValue .~ show targetWidth
       (submitEl, _) <- elClass "div" "input-group-btn" $ do
         elAttr' "button" ("class" =: "btn btn-default") (text "Update")
       return $ (tValue, domEvent Click submitEl)

@@ -14,4 +14,5 @@ import Shared.Domino.DoubleSix.Stats
 
 type Api =
        "new-image" :> QueryParam "url" Text :> Post '[JSON] Int
-  :<|> "get-stats" :> Capture "image-id" Int :> Get '[JSON] Stats
+  :<|> "get-stats" :> QueryParam "image-id" Int
+                   :> QueryParam "desired-width" Double :> Get '[JSON] Stats
