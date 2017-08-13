@@ -9,7 +9,7 @@ module Site
   ) where
 
 import App
-import Asciify (decodeGSImage)
+import Asciify (decodeGSImage, decodeHSVImage)
 import ClassyPrelude
 import Codec.Picture
 import Control.Lens
@@ -48,7 +48,7 @@ routes =
 apiServer :: Servant.Server Api AppHandler
 apiServer =
        newImageHandler
-  :<|> getStatsHandler
+  :<|> getRowsHandler
 
 -- servantApp :: Application AppHandler
 servantApp = serve api apiServer
@@ -113,60 +113,22 @@ newImageHandler mUrl = do
                   finishWith (emptyResponse & setResponseCode 500)
     Just imgId -> return $ unImageId imgId
 
-getStatsHandler :: Maybe Int -> Maybe Double -> AppHandler Stats
-getStatsHandler mi mw = do
+getRowsHandler :: Maybe Int -> Maybe Double -> AppHandler [[DoubleSix]]
+getRowsHandler mi mw = do
   Just i <- return mi
   Just w <- return mw
+  putStr $ "Width : " ++ tshow w
   let imgId = ImageId i
   bs <- toStrict <$> getImageBlob imgId
   case decodeGSImage bs of
-    Right img -> return $ getStats ( scaleDoubleSix img (desiredWidthToCount (w * 12) ) )
+    Right img -> do
+      let rows = scaleDoubleSix img (desiredWidthToCount (w * 12))
+      return rows
     Left er -> do logError $ encodeUtf8 $ pack ("Error decoding image : " ++ er)
                   finishWith (emptyResponse & setResponseCode 500)
-
-renderStats :: Monad m => Stats -> HtmlT m ()
-renderStats Stats{..} =
-    div_ [ class_ "row" ] $ do
-      div_ [ class_ "col-md-8" ] $ do
-        forM_ dominoRows $ \row -> do
-          div_ $ forM_ row $ \cell -> do
-            doubleSixToHtml cell
-      div_ [ class_ "col-md-3" ] $ do
-        return ()
-      div_ [ class_ "col-md-2" ] $ do
-        displayCounts dominoCounts
-  where
-    renderPrice :: Monad m => HtmlT m ()
-    renderPrice = do
-      return ()
-
-displayCounts :: Monad m => [(DoubleSix, Int)] -> HtmlT m ()
-displayCounts counts = do
-  span_ "total"
-  span_ $ toHtml (tshow $ sum $ map snd counts)
-  div_ $ do
-    forM_ counts $ \(ds, amount) -> do
-      doubleSixToHtml ds
-      span_ $ toHtml (tshow amount)
 
 lucid :: MonadSnap m => HtmlT m a -> m ()
 lucid response = do
   modifyResponse $ addHeader "Content-Type"  "text/html; charset=UTF-8"
   writeLBS =<< renderBST response
-
-doubleSixToHtml :: Monad m => DoubleSix -> HtmlT m ()
-doubleSixToHtml (DoubleSix l r) =
-    img_ [ src_ ("/images/double-six/" ++ sectionToWord l ++ "-" ++ sectionToWord r ++ ".png")
-         , style_ "width: 25px;"
-         ]
-  where
-    sectionToWord :: Section -> Text
-    sectionToWord Six = "six"
-    sectionToWord Five = "five"
-    sectionToWord Four = "four"
-    sectionToWord Three = "three"
-    sectionToWord Two = "two"
-    sectionToWord One = "one"
-    sectionToWord Blank = "blank"
-
 

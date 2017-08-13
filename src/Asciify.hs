@@ -1,9 +1,11 @@
 {-# LANGUAGE NoImplicitPrelude,
              LambdaCase,
+             MultiWayIf,
              OverloadedStrings #-}
 module Asciify
  ( loadGSImage
  , decodeGSImage
+ , decodeHSVImage
  , novemAsciify
  , novemAsciify'
  , quadAsciify
@@ -15,6 +17,7 @@ module Asciify
  , Quadrant(..)
  , Novemant(..)
  , Brightness(..)
+ , CharShape(..)
  , aShape
  ) where
 
@@ -55,6 +58,9 @@ widthToHeight = 3/2
 
 decodeGSImage :: ByteString -> Either String (Image Pixel8)
 decodeGSImage bs = grayscaleImage <$> decodeImage bs
+
+decodeHSVImage :: ByteString -> Either String (Image Pixel8)
+decodeHSVImage bs = hsvJustV <$> decodeImage bs
 
 loadGSImage :: String -> IO (Either String (Image Pixel8))
 loadGSImage fname = do
@@ -163,6 +169,21 @@ meanInRect img (x,y) (xd,yd) = floor $ weigthedMean valAndWgt
 -- Convert a dynamic image to grayscale of its image
 grayscaleImage :: DynamicImage -> Image Pixel8
 grayscaleImage dynImage = pixelMap computeLuma (convertRGB8 dynImage)
+
+hsvJustV :: DynamicImage -> Image Pixel8
+hsvJustV dynImage = pixelMap toV (convertRGB8 dynImage)
+
+toV :: PixelRGB8 -> Pixel8
+toV (PixelRGB8 r g b) = round $ 255 * ( wrap ((360*(2*pi)) * h2) / 360 )
+  where
+    -- This is very close approximation
+    alpha = 0.5 * ( 2 * fromIntegral r - fromIntegral g - fromIntegral b )
+    beta = (sqrt 3 / 2) * (fromIntegral g - fromIntegral b)
+    h2 = atan2 beta alpha :: Double
+    wrap v
+      | v < 0 = wrap (v+360)
+      | v > 360 = wrap (v-360)
+      | otherwise = v
 
 shapeToAscii :: CharShape -> Char
 shapeToAscii = aSToA . aShape

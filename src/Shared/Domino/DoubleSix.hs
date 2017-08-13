@@ -14,7 +14,7 @@ import Data.Aeson.TH
 data DoubleSix = DoubleSix
   { left :: Section
   , right :: Section
-  } deriving (Eq, Show, Ord)
+  } deriving (Eq, Show, Read, Ord)
 
 data Section =
     Blank
@@ -23,7 +23,7 @@ data Section =
   | Three
   | Four
   | Five
-  | Six deriving (Eq, Show, Ord)
+  | Six deriving (Eq, Show, Read, Ord)
 
 
 $(deriveJSON defaultOptions ''Section)

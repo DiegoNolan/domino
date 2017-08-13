@@ -4,3 +4,5 @@ site_key.txt
 log/
 tmp/
 key
+out/
+*.swp

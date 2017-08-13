@@ -24,17 +24,16 @@ dominoHeight :: Double
 dominoHeight = 0.75
 
 pricePerDomino :: Rational
-pricePerDomino = 17 / 28
+pricePerDomino = 17 / (28*12)
 
 weightPerDomino :: Double
-weightPerDomino = 0.07142
+weightPerDomino = 0.07142 / 16
 
 margins :: Double
 margins = 100
 
 data Stats = Stats
-  { dominoRows :: [[DoubleSix]]
-  , totalDominoes :: Int
+  { totalDominoes :: Int
   , dominoCounts :: [(DoubleSix, Int)]
   , tileDimensions :: (Int, Int)
   , physicalDimensions :: (Double, Double)
@@ -45,8 +44,7 @@ data Stats = Stats
 getStats :: [[DoubleSix]] -> Stats
 getStats rows =
     Stats
-      { dominoRows = rows
-      , totalDominoes = t
+      { totalDominoes = t
       , dominoCounts = cnts
       , tileDimensions = (w,h)
       , physicalDimensions = (dominoWidth * fromIntegral w, dominoHeight * fromIntegral h)

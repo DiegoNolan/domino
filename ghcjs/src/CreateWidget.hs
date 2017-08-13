@@ -57,7 +57,7 @@ data CreationFlow =
     NoUrl
   | NewUrl String
   | NewImage Int ArtOptions
-  | DisplayStats Int Stats ArtOptions
+  | DisplayStats Int [[DoubleSix]] ArtOptions
   | FetchFailure String
 
 createWidget :: forall t m. MonadWidget t m => m ()
@@ -96,23 +96,24 @@ fetchImageWidget url = do
 
 fetchStatsWidget :: MonadWidget t m => Int -> ArtOptions -> m (Event t CreationFlow)
 fetchStatsWidget i (ao@ArtOptions{..}) = do
-  let ( _ :<|> getStats ) = client (Proxy :: Proxy Api)
+  let ( _ :<|> getRows ) = client (Proxy :: Proxy Api)
                                    (Proxy :: MonadWidget t m => Proxy m)
                                    (constDyn (BasePath "/api"))
   postBuild <- getPostBuild
-  reqResult <- getStats (constant (Right i)) (constant (Right targetWidth)) postBuild
+  reqResult <- getRows (constant (Right i)) (constant (Right targetWidth)) postBuild
   text "Processing Results"
   return $ (\case
-               ResponseSuccess s _ -> DisplayStats i s ao
+               ResponseSuccess rs _ -> DisplayStats i rs ao
                ResponseFailure e _ -> FetchFailure e
                RequestFailure e    -> FetchFailure e
            ) <$> reqResult
 
-dominoArtWidget :: MonadWidget t m => Int -> Stats -> ArtOptions -> m (Event t CreationFlow)
-dominoArtWidget imgId stats initArtOptions = mdo
+dominoArtWidget :: MonadWidget t m => Int -> [[DoubleSix]]
+                -> ArtOptions -> m (Event t CreationFlow)
+dominoArtWidget imgId rows initArtOptions = mdo
   artOptions <- elClass "div" "row" $ mdo
     elClass "div" "col-xs-9" $ do
-      renderDominos (dominoRows stats)
+      renderDominos rows
       elAttr "img" (Map.fromList
                     [ ("src", imageUrl imgId)
                     , ("style", "width: 100%")
@@ -120,7 +121,7 @@ dominoArtWidget imgId stats initArtOptions = mdo
                    ) (return ())
     elClass "div" "col-xs-3" $ do
       ao <- artOptionsWidget initArtOptions
-      renderStasBar stats
+      renderStatsBar (getStats rows)
       return ao
   return $ NewImage imgId <$> updated artOptions
 
@@ -131,7 +132,7 @@ data ArtOptions = ArtOptions
 defaultArtOptions :: ArtOptions
 defaultArtOptions =
   ArtOptions
-    { targetWidth = 3
+    { targetWidth = 6
     }
 
 artOptionsWidget :: MonadWidget t m => ArtOptions -> m (Dynamic t ArtOptions)
@@ -149,8 +150,8 @@ artOptionsWidget ArtOptions{..} = do
                        (leftmost [ tag (constant ()) enterEvent, submitEv ])
   holdDyn defaultArtOptions (ArtOptions <$> fmapMaybe readMay valueEvent)
 
-renderStasBar :: MonadWidget t m => Stats -> m ()
-renderStasBar Stats{..} = do
+renderStatsBar :: MonadWidget t m => Stats -> m ()
+renderStatsBar Stats{..} = do
     elClass "div" "row" $ do
       elClass "div" "col-xs-12 center-text" $ el "h3" (text "Info")
 
@@ -164,6 +165,14 @@ renderStasBar Stats{..} = do
 
     elClass "div" "row" $ do
       elClass "div" "col-xs-12" $ renderCounts dominoCounts
+
+    elClass "div" "row" $ do
+      elClass "div" "col-xs-12" $ do
+        text $ "Estimated weight : " ++ show weight
+
+    elClass "div" "row" $ do
+      elClass "div" "col-xs-12" $ do
+        text $ "Price : $" ++ show ((price + 50) `div` 100)
   where
     feetToReadable :: Double -> String
     feetToReadable d = show f ++ "' " ++ show inches ++ "\""
