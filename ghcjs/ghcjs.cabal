@@ -20,7 +20,6 @@ library
   build-depends:       base
                      , aeson
                      , containers
-                     , classy-prelude
                      , ghcjs-base
                      , ghcjs-dom
                      , lens

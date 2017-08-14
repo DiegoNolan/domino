@@ -1,4 +1,4 @@
-{ mkDerivation, aeson, base, classy-prelude, containers, ghcjs-base
+{ mkDerivation, aeson, base, containers, ghcjs-base
 , ghcjs-dom, lens, reflex, reflex-dom, servant, servant-reflex
 , stdenv
 }:
@@ -9,7 +9,7 @@ mkDerivation {
   isLibrary = true;
   isExecutable = true;
   libraryHaskellDepends = [
-    aeson base classy-prelude containers ghcjs-base ghcjs-dom lens
+    aeson base containers ghcjs-base ghcjs-dom lens
     reflex reflex-dom servant servant-reflex
   ];
   executableHaskellDepends = [ base ];
