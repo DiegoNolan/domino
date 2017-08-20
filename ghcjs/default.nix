@@ -3,7 +3,7 @@ let
     packageOverrides = pkgs: rec {
       haskellPackages = pkgs.haskellPackages.override {
         overrides = self:  super: rec {
-          dlist = self.callPackage ./dlist-0.8.0.2.nix { };
+          # dlist = self.callPackage ./dlist-0.8.0.2.nix { };
           servant-reflex = self.callPackage ../../servant-reflex { };
         };
       };

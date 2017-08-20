@@ -23,10 +23,14 @@ library
                      , ghcjs-base
                      , ghcjs-dom
                      , lens
+                     , lucid
                      , reflex
                      , reflex-dom
+                     , safe
                      , servant
+                     , servant-lucid
                      , servant-reflex
+                     , text
   default-language:    Haskell2010
 
 executable create

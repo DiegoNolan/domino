@@ -1,8 +1,11 @@
 .ghci
 .stack-work/
 site_key.txt
+dist/
 log/
 tmp/
 key
 out/
 *.swp
+ghcjs/result
+result

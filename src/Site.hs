@@ -1,105 +1,102 @@
 {-# LANGUAGE ExtendedDefaultRules,
              FlexibleContexts,
+             FlexibleInstances,
              NoImplicitPrelude,
              OverloadedStrings,
+             RankNTypes,
              RecordWildCards,
-             TemplateHaskell #-}
+             TemplateHaskell,
+             TypeOperators #-}
 module Site
-  ( app
+  ( runApp
   ) where
 
-import App
+import ClassyPrelude hiding (Handler)
 import Asciify (decodeGSImage, decodeHSVImage)
-import ClassyPrelude
+import AWS
 import Codec.Picture
 import Control.Lens
+import Control.Monad.Error.Class
 import qualified Data.Text as Text
+import Database.PostgreSQL.Simple
 import DoubleSix
 import Image
 import Lucid hiding (with)
 import Network.AWS
-import Servant hiding (serveDirectory, POST, addHeader)
-import Servant.Server.Internal.SnapShims
+import Network.Wai
+import Network.Wai.Handler.Warp
+import Servant
 import Shared.Api
 import Shared.Domino.DoubleSix
 import Shared.Domino.DoubleSix.Stats
-import Snap.Core
-import Snap.Util.FileServe
-import Snap.Snaplet
-import Snap.Snaplet.Auth
-import Snap.Snaplet.Auth.Backends.PostgresqlSimple
-import Snap.Snaplet.AWS
-import Snap.Snaplet.PostgresqlSimple
-import Snap.Snaplet.Session.Backends.CookieSession
-import SnapUtil
 import System.FilePath.Posix
 import qualified Network.Wreq as Wreq
 
-api :: Servant.Proxy Api
-api = Servant.Proxy
+runApp :: IO ()
+runApp = do
+  cfg <- getConfig
+  run 8000 (app cfg)
 
-routes :: [(ByteString, AppHandler ())]
-routes =
-  [ ("/js", serveDirectory "static/ghcjs")
-  , ("/images", serveDirectory "static/images")
-  , ("/", landingHandler)
-  ]
+wholeApi :: Proxy WholeApi
+wholeApi = Proxy
 
-apiServer :: Servant.Server Api AppHandler
-apiServer =
-       newImageHandler
+api :: Proxy Api
+api = Proxy
+
+wrapperApi :: Proxy WrapperApi
+wrapperApi = Proxy
+
+staticApi :: Proxy StaticApi
+staticApi = Proxy
+
+getConfig :: IO Config
+getConfig = do
+  conn <- connect $ ConnectInfo "localhost" 5432 "nolan" "" "domino"
+  env <- newEnv Discover
+  return $ Config { confEnv = (env & envRegion .~ Oregon)
+                  , confConn = conn
+                  }
+
+app :: Config -> Application
+app cfg = serve wholeApi (server cfg)
+
+server :: Config -> Server WholeApi
+server cfg =
+       staticServer
+  :<|> enter (readerToHandler cfg) serverT
+
+staticServer :: Server StaticApi
+staticServer =
+       serveDirectoryFileServer "static/ghcjs"
+  :<|> serveDirectoryFileServer "static/images"
+
+data Config = Config
+  { confEnv :: Env
+  , confConn :: Connection -- TODO: Pool later
+  }
+
+instance MonadIO m => HasPostgres (ReaderT Config m) where
+  getPostgresState = confConn <$> ask
+
+instance MonadIO m => HasAWS (ReaderT Config m) where
+  getAWSEnv = confEnv <$> ask
+
+readerToHandler' :: forall a. Config -> ReaderT Config IO a -> Handler a
+readerToHandler' cfg m = liftIO $ runReaderT m cfg
+
+readerToHandler :: Config -> ReaderT Config IO :~> Handler
+readerToHandler cfg = NT (readerToHandler' cfg)
+
+serverT :: (HasPostgres m, HasAWS m)
+        => ServerT WrapperApi m
+serverT =
+       return IndexPage
+  :<|>
+  (    newImageHandler
   :<|> getRowsHandler
+  )
 
--- servantApp :: Application AppHandler
-servantApp = serve api apiServer
-
-app :: SnapletInit App App
-app = makeSnaplet "domino website" description Nothing $ do
-    d <- nestSnaplet "pg-db" db $ pgsInit' $ pgsDefaultConfig "host=localhost port=5432 dbname=domino"
-    a <- nestSnaplet "auth" auth $ initPostgresAuth sess d
-    s <- nestSnaplet "sess" sess $ initCookieSessionManager "key" "domino-session"
-                                     Nothing (Just (86400*14))
-    env <- liftIO $ newEnv Oregon Discover
-    am <- nestSnaplet "aws" aws $ awsInit env
-
-    addRoutes $ routes ++ [("api", applicationToSnap servantApp)]
-
-    return $ App s a d am
-  where
-    description = "A website for setting domino art"
-
-handleLogin :: Maybe Text -> Handler App (AuthManager App) ()
-handleLogin authError = undefined
-
-{-
-setCache :: MonadSnap m => m a -> m ()
-setCache action = do
-    pinfo <- liftM rqPathInfo getRequest
-    action
-    when ("media" `B.isPrefixOf` pinfo) $ do
-       expTime <- liftM (+604800) $ liftIO epochTime
-       s       <- liftIO $ formatHttpTime expTime
-       modifyResponse $
-          setHeader "Cache-Control" "public, max-age=604800" .
-          setHeader "Expires" s
--}
-
-landingHandler :: AppHandler ()
-landingHandler = lucid $ masterPage $ do
-  div_ [ id_ "create" ] ""
-  script_ [ src_ "/js/create.js" ] ""
-
-masterPage :: Monad m => HtmlT m () -> HtmlT m ()
-masterPage inner =
-  html_ $ do
-    head_ $ do
-      link_ [ href_ "https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/3.3.7/css/bootstrap.css"
-            , rel_ "stylesheet"
-            ]
-    body_ $ do
-      inner
-
-newImageHandler :: Maybe Text -> AppHandler Int
+newImageHandler :: (HasPostgres m, HasAWS m) => Maybe Text -> m Int
 newImageHandler mUrl = do
   print mUrl
   Just url <- return mUrl
@@ -109,11 +106,12 @@ newImageHandler mUrl = do
       ct = r ^. Wreq.responseHeader "Content-Type"
   mImgId <- createImage (decodeUtf8 ct) bs
   case mImgId of
-    Nothing -> do logError "Error creating image"
-                  finishWith (emptyResponse & setResponseCode 500)
+    Nothing -> error "unable"
+    -- throwError $ err500 { errBody = "Unable to download image" }
     Just imgId -> return $ unImageId imgId
 
-getRowsHandler :: Maybe Int -> Maybe Double -> AppHandler [[DoubleSix]]
+getRowsHandler :: (HasPostgres m, HasAWS m)
+               => Maybe Int -> Maybe Double -> m [[DoubleSix]]
 getRowsHandler mi mw = do
   Just i <- return mi
   Just w <- return mw
@@ -124,11 +122,6 @@ getRowsHandler mi mw = do
     Right img -> do
       let rows = scaleDoubleSix img (desiredWidthToCount (w * 12))
       return rows
-    Left er -> do logError $ encodeUtf8 $ pack ("Error decoding image : " ++ er)
-                  finishWith (emptyResponse & setResponseCode 500)
-
-lucid :: MonadSnap m => HtmlT m a -> m ()
-lucid response = do
-  modifyResponse $ addHeader "Content-Type"  "text/html; charset=UTF-8"
-  writeLBS =<< renderBST response
+    Left er -> error "error"
+    --throwError $ err500 { errBody = encodeUtf8 ( pack ("Error decoding image : " ++ er)) }
 

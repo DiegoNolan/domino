@@ -34,12 +34,11 @@ Executable domino
                 postgresql-simple,
                 resourcet,
                 servant >= 0.7,
-                servant-snap,
-                snap >= 1.0.0,
-                snap-core,
-                snap-server,
-                snaplet-postgresql-simple,
+                servant-lucid,
+                servant-server,
                 vector,
+                wai,
+                warp,
                 wreq
 
   if impl(ghc >= 6.12.0)

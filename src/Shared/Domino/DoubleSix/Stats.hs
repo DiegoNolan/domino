@@ -1,5 +1,4 @@
-{-# LANGUAGE NoImplicitPrelude,
-             LambdaCase,
+{-# LANGUAGE LambdaCase,
              OverloadedStrings,
              TemplateHaskell #-}
 module Shared.Domino.DoubleSix.Stats
@@ -8,9 +7,9 @@ module Shared.Domino.DoubleSix.Stats
  , desiredWidthToCount
  ) where
 
-import ClassyPrelude
 import Data.Aeson
 import Data.Aeson.TH
+import Data.List
 import Shared.Domino.DoubleSix
 
 desiredWidthToCount :: Double -> Int
@@ -55,7 +54,7 @@ getStats rows =
     t = sum $ map snd cnts
     cnts = getCounts $ concat rows
     -- TODO: unsafe
-    w = length (headEx rows)
+    w = length (head rows)
     h = length rows
 
 getCounts :: [DoubleSix] -> [(DoubleSix, Int)]

@@ -1,5 +1,4 @@
-{-# LANGUAGE NoImplicitPrelude,
-             LambdaCase,
+{-# LANGUAGE LambdaCase,
              OverloadedStrings,
              TemplateHaskell #-}
 module Shared.Domino.DoubleSix
@@ -7,7 +6,6 @@ module Shared.Domino.DoubleSix
  , Section(..)
  ) where
 
-import ClassyPrelude
 import Data.Aeson
 import Data.Aeson.TH
 

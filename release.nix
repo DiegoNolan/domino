@@ -6,14 +6,6 @@ let
         overrides = haskellPackagesNew: haskellPackagesOld: rec {
           domino =
             haskellPackagesNew.callPackage ./default.nix { };
-
-          snap = pkgs.haskell.lib.dontCheck haskellPackagesOld.snap;
-
-          snaplet-postgresql-simple = pkgs.haskell.lib.dontCheck
-            (haskellPackagesNew.callPackage ../snaplet-postgresql-simple { });
-
-          servant-snap =
-            pkgs.haskell.lib.dontCheck haskellPackagesOld.servant-snap;
         };
       };
     };

@@ -1,64 +1,50 @@
-{-# LANGUAGE OverloadedStrings,
-             NoImplicitPrelude,
+{-# LANGUAGE FlexibleContexts,
+             OverloadedStrings,
+             DataKinds,
              LambdaCase,
+             PolyKinds,
              RecursiveDo,
              RecordWildCards,
              ScopedTypeVariables,
+             TypeOperators,
              RankNTypes #-}
 {-# LANGUAGE PartialTypeSignatures #-}
 module CreateWidget
   ( app
   ) where
 
-import ClassyPrelude
+import ClientAPI
+import Control.Monad
 import GHCJS.DOM
 import GHCJS.DOM.Element (getClientWidth)
 import GHCJS.DOM.Node
 import GHCJS.DOM.Document hiding (select)
-import GHCJS.DOM.Types (castToHTMLElement)
+import GHCJS.DOM.Types hiding (Event, Text)
+import Data.Monoid
 import Data.Proxy
+import Data.Text (Text)
+import qualified Data.Text as Text
 import qualified Data.Map as Map
 import JavaScript.Web.Location
 import Reflex
 import Reflex.Dom
 import Reflex.Host.Class
+import Safe
 import Servant.API
 import Servant.Reflex
-import Shared.Api
 import Shared.Domino.DoubleSix
 import Shared.Domino.DoubleSix.Stats
 import Shared.Image
 
-runWidgetsOnElemsById :: [ (String
-                           , Widget Spider
-                               (Gui Spider (WithWebView SpiderHost) (HostFrame Spider)) ())]
-                      -> IO ()
-runWidgetsOnElemsById widgets = runWebGUI $ \webView -> do
-  Just doc <- webViewGetDomDocument webView
-  forM_ widgets $ \(elemId, widget) -> do
-    Just elm <- getElementById doc elemId
-    attachWidget (castToHTMLElement elm) webView widget
-
 app :: IO ()
-app = runWidgetsOnElemsById
-  [ ("create", createWidget) ]
-
-handleResult :: MonadWidget t m => (a -> m b) -> Maybe (ReqResult a) -> m (Maybe b)
-handleResult f (Just (ResponseSuccess a _)) = Just <$> f a
-handleResult _ (Just (ResponseFailure e _)) = do
-  text e
-  return Nothing
-handleResult _ (Just (RequestFailure e)) = do
-  text e
-  return Nothing
-handleResult _ _ = return Nothing
+app = mainWidgetInElementById "create" createWidget
 
 data CreationFlow =
     NoUrl
-  | NewUrl String
+  | NewUrl Text
   | NewImage Int ArtOptions
   | DisplayStats Int [[DoubleSix]] ArtOptions
-  | FetchFailure String
+  | FetchFailure Text
 
 createWidget :: forall t m. MonadWidget t m => m ()
 createWidget = mdo
@@ -68,11 +54,11 @@ createWidget = mdo
 
 creationFlowWidgetMapper :: MonadWidget t m => CreationFlow -> m (Event t CreationFlow)
 creationFlowWidgetMapper NoUrl = newUrlWidget
-creationFlowWidgetMapper (NewUrl url) = fetchImageWidget (pack url)
+creationFlowWidgetMapper (NewUrl url) = fetchImageWidget url
 creationFlowWidgetMapper (NewImage i w) = fetchStatsWidget i w
 creationFlowWidgetMapper (DisplayStats i stats ao) = dominoArtWidget i stats ao
 creationFlowWidgetMapper (FetchFailure s) = do
-  text ("Fetch failure : " ++ s)
+  text ("Fetch failure : " <> s)
   return never
 
 newUrlWidget :: MonadWidget t m => m (Event t CreationFlow)
@@ -80,32 +66,30 @@ newUrlWidget = do
   urlDyn <- inputOnEnter
   return $ NewUrl <$> updated urlDyn
 
+type Test = "test" :> Get '[JSON] Int
+
 fetchImageWidget :: MonadWidget t m => Text -> m (Event t CreationFlow)
 fetchImageWidget url = do
-  let ( newImage :<|> _ ) = client (Proxy :: Proxy Api)
-                                   (Proxy :: MonadWidget t m => Proxy m)
-                                   (constDyn (BasePath "/api"))
+  -- result <- test
   postBuild <- getPostBuild
-  reqResult <- newImage (constant (Right url)) postBuild
+  reqResult <- newImage (constDyn (QParamSome url)) postBuild
   text "Fetching Image"
   return $ (\case
-               ResponseSuccess i _ -> NewImage i defaultArtOptions
-               ResponseFailure e _ -> FetchFailure e
-               RequestFailure e    -> FetchFailure e
+               ResponseSuccess _ i _ -> NewImage i defaultArtOptions
+               ResponseFailure _ e _ -> FetchFailure e
+               RequestFailure _ e    -> FetchFailure e
            ) <$> reqResult
 
 fetchStatsWidget :: MonadWidget t m => Int -> ArtOptions -> m (Event t CreationFlow)
 fetchStatsWidget i (ao@ArtOptions{..}) = do
-  let ( _ :<|> getRows ) = client (Proxy :: Proxy Api)
-                                   (Proxy :: MonadWidget t m => Proxy m)
-                                   (constDyn (BasePath "/api"))
   postBuild <- getPostBuild
-  reqResult <- getRows (constant (Right i)) (constant (Right targetWidth)) postBuild
+  reqResult <- getArtRows (constDyn (QParamSome i))
+                          (constDyn (QParamSome targetWidth)) postBuild
   text "Processing Results"
   return $ (\case
-               ResponseSuccess rs _ -> DisplayStats i rs ao
-               ResponseFailure e _ -> FetchFailure e
-               RequestFailure e    -> FetchFailure e
+               ResponseSuccess _ rs _ -> DisplayStats i rs ao
+               ResponseFailure _ e _  -> FetchFailure e
+               RequestFailure _ e     -> FetchFailure e
            ) <$> reqResult
 
 dominoArtWidget :: MonadWidget t m => Int -> [[DoubleSix]]
@@ -115,7 +99,7 @@ dominoArtWidget imgId rows initArtOptions = mdo
     elClass "div" "col-xs-9" $ do
       renderDominos rows
       elAttr "img" (Map.fromList
-                    [ ("src", imageUrl imgId)
+                    [ ("src", Text.pack (imageUrl imgId))
                     , ("style", "width: 100%")
                     ]
                    ) (return ())
@@ -141,14 +125,14 @@ artOptionsWidget ArtOptions{..} = do
     elClass "div" "input-group" $ do
       tValue <- textInput $ def
                   & textInputConfig_attributes .~ constDyn ("class" =: "form-control")
-                  & textInputConfig_initialValue .~ show targetWidth
+                  & textInputConfig_initialValue .~  Text.pack (show targetWidth)
       (submitEl, _) <- elClass "div" "input-group-btn" $ do
         elAttr' "button" ("class" =: "btn btn-default") (text "Update")
       return $ (tValue, domEvent Click submitEl)
   let enterEvent = ffilter (== 13) (_textInput_keyup textValue)
       valueEvent = tagDyn (_textInput_value textValue)
                        (leftmost [ tag (constant ()) enterEvent, submitEv ])
-  holdDyn defaultArtOptions (ArtOptions <$> fmapMaybe readMay valueEvent)
+  holdDyn defaultArtOptions (ArtOptions <$> fmapMaybe (readMay . Text.unpack) valueEvent)
 
 renderStatsBar :: MonadWidget t m => Stats -> m ()
 renderStatsBar Stats{..} = do
@@ -158,24 +142,25 @@ renderStatsBar Stats{..} = do
     elClass "div" "row" $ do
       elClass "div" "col-xs-12" $ do
         let (w,h) = physicalDimensions
-        text $ feetToReadable w ++ " by " ++ feetToReadable h
+        text $ feetToReadable w <> " by " <> feetToReadable h
 
     elClass "div" "row" $ do
-      elClass "div" "col-xs-12" $ text (show totalDominoes ++ " Total Dominoes")
+      elClass "div" "col-xs-12" $ text (Text.pack (show totalDominoes) <>
+                                        " Total Dominoes")
 
     elClass "div" "row" $ do
       elClass "div" "col-xs-12" $ renderCounts dominoCounts
 
     elClass "div" "row" $ do
       elClass "div" "col-xs-12" $ do
-        text $ "Estimated weight : " ++ show weight
+        text $ "Estimated weight : " <> Text.pack (show weight)
 
     elClass "div" "row" $ do
       elClass "div" "col-xs-12" $ do
-        text $ "Price : $" ++ show ((price + 50) `div` 100)
+        text $ "Price : $" <> Text.pack (show ((price + 50) `div` 100))
   where
-    feetToReadable :: Double -> String
-    feetToReadable d = show f ++ "' " ++ show inches ++ "\""
+    feetToReadable :: Double -> Text
+    feetToReadable d = Text.pack $ show f ++ "' " ++ show inches ++ "\""
       where
         sixInFoot = 12 * 16
         sixteenths = round (d * fromIntegral sixInFoot) :: Int
@@ -189,7 +174,7 @@ displayInt = display
 renderDominos :: MonadWidget t m => [[DoubleSix]] -> m ()
 renderDominos rs = forM_ rs $ \row -> el "div" (renderRows row)
   where
-    cnt = fromIntegral $ length (headEx rs) :: Double
+    cnt = fromIntegral $ length (head rs) :: Double
     renderRows :: MonadWidget t m => [DoubleSix] -> m ()
     renderRows r = forM_ r (renderDoubleSix (Percentage (100 / cnt)))
 
@@ -200,15 +185,15 @@ data DominoSize =
 renderDoubleSix :: MonadWidget t m => DominoSize -> DoubleSix -> m ()
 renderDoubleSix ds (DoubleSix l r) =
     elAttr "img" (Map.fromList
-                  [ ("src", "/images/double-six/" ++ unpack (sectionToWord l) ++ "-" ++
-                      unpack (sectionToWord r) ++ ".png")
-                  , ("style", "width: " ++ width)
+                  [ ("src", "/images/double-six/" <> sectionToWord l <> "-" <>
+                      sectionToWord r <> ".png")
+                  , ("style", "width: " <> width)
                   ]
                  ) (return ())
   where
     width = case ds of
-              Percentage d -> show d ++ "%"
-              Fixed d -> show d ++ "px"
+              Percentage d -> Text.pack $ show d ++ "%"
+              Fixed d -> Text.pack $ show d ++ "px"
     sectionToWord :: Section -> Text
     sectionToWord Six = "six"
     sectionToWord Five = "five"
@@ -224,10 +209,10 @@ renderCounts counts = do
     el "tbody" $ do
       forM_ counts $ \(ds, amount) ->
         el "tr" $ do
-          el "td" (text $ show amount)
+          el "td" (text . Text.pack $ show amount)
           el "td" $ renderDoubleSix (Fixed 70) ds
 
-inputOnEnter :: MonadWidget t m => m (Dynamic t String)
+inputOnEnter :: MonadWidget t m => m (Dynamic t Text)
 inputOnEnter =
   elClass "div" "row" $ do
     elClass "div" "col-sm-3 col-xs-0" (return ())
