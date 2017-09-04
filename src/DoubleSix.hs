@@ -6,6 +6,7 @@ module DoubleSix
   ( scaleDoubleSix
   , novemDoubleSix
   , invertGrayscale
+  , flatDialate
   , sobel
   , amplifyEdges
   , gaussianFilter
@@ -22,7 +23,10 @@ import Codec.Picture.Types
 import Shared.Domino.DoubleSix
 
 scaleDoubleSix :: Image Pixel8 -> Int -> [[DoubleSix]]
-scaleDoubleSix img chsWide = quadAsciify' img chsWide quadMapping
+scaleDoubleSix img chsWide = take (length rows - 1) rows
+  -- TODO : This is janky
+  where
+    rows = quadAsciify' img chsWide quadMapping
   --scaleAsciify' img chsWide scaleMapping
 
 generateDoubleSixLayout :: [[DoubleSix]] -> Image Pixel8
@@ -125,6 +129,33 @@ gaussianKernal = Kernal
     (f 3 1, f 3 2, f 3 3)
   where
     f = hij 1.4 1
+
+flatDialate :: Int -> Image Pixel8 -> Image Pixel8
+flatDialate k img = generateImage f (imageWidth img) (imageHeight img)
+  where
+    f x y = maximumEx $
+            map (\(x', y') -> pixDef0 x' y')
+              [ (x', y')
+              | x' <- xs
+              , y' <- ys
+              ]
+      where
+        xs = map (+x) [(1-2*k)..(2*k-1)]
+        ys = map (+y) [(1-2*k)..(2*k-1)]
+    pixDef0 :: Int -> Int -> Pixel8
+    pixDef0 x y
+      | x < 0                = 0
+      | y < 0                = 0
+      | x >= imageWidth img  = 0
+      | y >= imageHeight img = 0
+      | otherwise            = pixelAt img x y
+
+sobelBinary :: Double -> Image Pixel8 -> Image Pixel8
+sobelBinary tol img =
+  pixelMap (\p -> if fromIntegral p / 255 > tol
+                  then 255
+                  else 0
+           ) (sobel img)
 
 sobel :: Image Pixel8 -> Image Pixel8
 sobel image = clampFloatImage $ generateImage

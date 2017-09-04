@@ -51,7 +51,7 @@ staticApi = Proxy
 
 getConfig :: IO Config
 getConfig = do
-  conn <- connect $ ConnectInfo "localhost" 5432 "nolan" "" "domino"
+  conn <- connect $ ConnectInfo "localhost" 5432 "root" "" "domino"
   env <- newEnv Discover
   return $ Config { confEnv = (env & envRegion .~ Oregon)
                   , confConn = conn
@@ -120,7 +120,9 @@ getRowsHandler mi mw = do
   bs <- toStrict <$> getImageBlob imgId
   case decodeGSImage bs of
     Right img -> do
-      let rows = scaleDoubleSix img (desiredWidthToCount (w * 12))
+      let rows = scaleDoubleSix
+                 img
+                 (desiredWidthToCount (w * 12))
       return rows
     Left er -> error "error"
     --throwError $ err500 { errBody = encodeUtf8 ( pack ("Error decoding image : " ++ er)) }

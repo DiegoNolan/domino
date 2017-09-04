@@ -16,6 +16,7 @@ Executable domino
 
   Build-depends:
                 adjunctions,
+                aeson,
                 amazonka,
                 amazonka-core,
                 amazonka-s3,
@@ -36,6 +37,7 @@ Executable domino
                 servant >= 0.7,
                 servant-lucid,
                 servant-server,
+                text,
                 vector,
                 wai,
                 warp,
