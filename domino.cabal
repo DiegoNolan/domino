@@ -33,6 +33,7 @@ Executable domino
 --                MonadCatchIO-transformers,
                 mtl,
                 postgresql-simple,
+                pretty,
                 resourcet,
                 servant >= 0.7,
                 servant-lucid,

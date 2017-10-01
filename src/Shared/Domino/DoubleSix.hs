@@ -6,6 +6,7 @@ module Shared.Domino.DoubleSix
  ( DoubleSix(..)
  , Section(..)
  , flipDomino
+ , makeMinDoubleSix
  ) where
 
 import Data.Aeson
@@ -18,6 +19,9 @@ data DoubleSix = DoubleSix
 
 flipDomino :: DoubleSix -> DoubleSix
 flipDomino DoubleSix{..} = DoubleSix right left
+
+makeMinDoubleSix :: DoubleSix -> DoubleSix
+makeMinDoubleSix ds = if flipDomino ds < ds then flipDomino ds else ds
 
 data Section =
     Blank

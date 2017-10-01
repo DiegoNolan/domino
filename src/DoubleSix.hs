@@ -15,19 +15,56 @@ module DoubleSix
 
 import ClassyPrelude
 import Asciify hiding (Blank)
+import Data.Aeson
 import Data.List ((!!))
+import qualified Data.Vector.Storable as V
 import Debug.Trace
 import qualified Asciify as A
 import Codec.Picture
 import Codec.Picture.Types
 import Shared.Domino.DoubleSix
+import Shared.Domino.DoubleSix.Stats
+import System.Directory (createDirectoryIfMissing)
+import Text.PrettyPrint.HughesPJClass
+
+testGeneration :: String -> String -> (Image Pixel8 -> Image Pixel8)-> IO ()
+testGeneration inFile outFolder f = do
+  bs <- readFile inFile
+  case decodeGSImage bs of
+    Left _ -> putStr "Failed"
+    Right i -> do
+      let rows = scaleDoubleSix (f i) (desiredWidthToCount (2*12))
+          folderName = "out/" ++ outFolder
+          ds = generateDoubleSixLayout rows
+      createDirectoryIfMissing True folderName
+      writePng (folderName ++ "/pattern.png") ds
+      writePng (folderName ++ "/replica.png") $ invertGrayscale ds
+      writeFile (folderName ++ "/stats.txt")
+          ((encodeUtf8 . pack . prettyShow . getStats) rows)
+
+testStuff :: FilePath -> IO ()
+testStuff inFile = do
+  bs <- readFile inFile
+  case decodeGSImage bs of
+    Left _ -> putStr "Failed"
+    Right i -> do
+      let dat  = imageData i
+          pMax = fromIntegral (V.foldl' (\acc i -> max acc i) minBound dat) :: Rational
+          pMin = fromIntegral (V.foldl' (\acc i -> min acc i) maxBound dat) :: Rational
+          cnts v = V.foldl' (\acc i -> if i == v then acc+1 else acc) 0 dat :: Int
+          allCounts = map (\v -> (v,cnts v)) [0..255]
+      putStrLn $ "max pixel : " ++ tshow pMax
+      putStrLn $ "min pixel : " ++ tshow pMin
+      forM_ allCounts $ \(v, c) ->
+        putStrLn $ tshow v ++ "s : " ++ tshow c
 
 scaleDoubleSix :: Image Pixel8 -> Int -> [[DoubleSix]]
-scaleDoubleSix img chsWide = take (length rows - 1) rows
-  -- TODO : This is janky
+scaleDoubleSix img chsWide =
+    -- TODO : This is janky
+    take (length rows - 1) rows
   where
     rows = quadAsciify' img chsWide quadMapping
-  --scaleAsciify' img chsWide scaleMapping
+    --scaleAsciify' img chsWide scaleMapping
 
 generateDoubleSixLayout :: [[DoubleSix]] -> Image Pixel8
 generateDoubleSixLayout rows =
@@ -36,7 +73,7 @@ generateDoubleSixLayout rows =
   where
     pixelsPerWidth = 100
     pixelsPerHeight = 50
-    borderSize = 3
+    borderSize = 2
     radius = 5
     domWidth = length (rows !! 0)
     domHeight = length rows
@@ -252,7 +289,10 @@ quadMapping :: CharShape -> DoubleSix
 quadMapping (tl, tr, bl, br) =
     DoubleSix (halfMapping (combine tl bl)) (halfMapping (combine tr br))
   where
-    combine t b = round ((fromIntegral t + fromIntegral b) / 2 :: Double)
+    combine t b = fromIntegral $ (t' + b') `div` 2
+      where
+        t' = fromIntegral t :: Int
+        b' = fromIntegral b :: Int
     halfMapping v
       | v >= 216  = Six
       | v >= 180  = Five

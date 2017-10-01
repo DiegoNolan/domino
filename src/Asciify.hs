@@ -14,6 +14,8 @@ module Asciify
  , scaleAsciify'
  , testAllAlgorithms
  , asciifyCells
+ , normPixels
+ , meanInRect
  , Quadrant(..)
  , Novemant(..)
  , Brightness(..)
@@ -51,10 +53,8 @@ data Novemant = Novemant !Brightness !Brightness !Brightness
 asciifyCells :: [String] -> String
 asciifyCells = intercalate "\n"
 
--- This is the ratio we use to adjust for the fact that characters are not squares.
--- TODO: Make configurable
 widthToHeight:: Rational
-widthToHeight = 3/2
+widthToHeight = 2
 
 decodeGSImage :: ByteString -> Either String (Image Pixel8)
 decodeGSImage bs = grayscaleImage <$> decodeImage bs
@@ -111,15 +111,24 @@ scaleAsciify' img chsWide f = runner img chsWide (\i tl br -> f (meanInRect i tl
 -- Normalize the grayscale image so the darkest pixel is zero and the
 -- brightest is 255
 normPixels :: Image Pixel8 -> Image Pixel8
-normPixels img = pixelMap (\p -> floor $ fromIntegral p - pMin * (255 / (pMax-pMin) ) ) img
-  where pMax = fromIntegral (V.foldl' (\acc i -> max acc i) 0 dat) :: Rational
-        pMin = fromIntegral (V.foldl' (\acc i -> min acc i) 255 dat) :: Rational
-        dat  = imageData img
+normPixels img =
+    pixelMap (\p -> let d = (fromIntegral p - pMin)*(fromIntegral mxWord / (pMax-pMin))
+                    in if | d >= fromIntegral mxWord -> mxWord
+                          | d <= fromIntegral mnWord -> mnWord
+                          | otherwise -> round d
+             ) img
+  where
+    mxWord = maxBound :: Pixel8
+    mnWord = minBound :: Pixel8
+    pMax = fromIntegral (V.foldl' (\acc i -> max acc i) mnWord dat) :: Rational
+    pMin = fromIntegral (V.foldl' (\acc i -> min acc i) mxWord dat) :: Rational
+    dat  = imageData img
 
-weigthedMean :: [(Word8,Rational)] -> Rational
-weigthedMean xs = if den /= 0 then num / den else 255 -- Catch divide by zeros
-   where num = foldl' (\acc (a,b) -> (fromIntegral a)*b + acc) 0 xs
-         den = foldl' (\acc (_,b) -> acc + b) 0 xs
+weightedMean :: [(Word8,Rational)] -> Rational
+weightedMean xs = if den /= 0 then num / den else 255 -- Catch divide by zeros
+   where
+     num = foldl' (\acc (a,b) -> fromIntegral a * b + acc) 0 xs
+     den = foldl' (\acc (_,b) -> acc + b) 0 xs
 
 shape :: Image Pixel8 -- ^ grayscale image
       -> RCord -- ^ Offset from the upper left of the image
@@ -153,7 +162,7 @@ charDims img charsWide = (xdim, xdim/widthToHeight)
 
 -- Returns the mean weighted pixel value in a rectangle of a grayscale image
 meanInRect :: (Image Pixel8) -> RCord -> RCord -> Word8
-meanInRect img (x,y) (xd,yd) = floor $ weigthedMean valAndWgt
+meanInRect img (x,y) (xd,yd) = floor $ weightedMean valAndWgt
    where maxX = (imageWidth img) - 1
          maxY = (imageHeight img) - 1
          inds = [ (i,j) | i <- xinds, j <- yinds]
