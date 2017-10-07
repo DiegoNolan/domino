@@ -1,5 +1,6 @@
 {-# LANGUAGE NoImplicitPrelude,
              LambdaCase,
+             MultiWayIf,
              OverloadedStrings,
              TemplateHaskell #-}
 module DoubleSix
@@ -13,10 +14,13 @@ module DoubleSix
   , generateDoubleSixLayout
   ) where
 
-import ClassyPrelude
+import ClassyPrelude hiding ((<|))
 import Asciify hiding (Blank)
 import Data.Aeson
 import Data.List ((!!))
+import qualified Data.Map.Strict as Map
+import qualified Data.Sequence as Seq
+import qualified Data.Vector as Vec
 import qualified Data.Vector.Storable as V
 import Debug.Trace
 import qualified Asciify as A
@@ -27,13 +31,13 @@ import Shared.Domino.DoubleSix.Stats
 import System.Directory (createDirectoryIfMissing)
 import Text.PrettyPrint.HughesPJClass
 
-testGeneration :: String -> String -> (Image Pixel8 -> Image Pixel8)-> IO ()
-testGeneration inFile outFolder f = do
+testGeneration :: Double -> String -> String -> (Image Pixel8 -> Image Pixel8)-> IO ()
+testGeneration sz inFile outFolder f = do
   bs <- readFile inFile
   case decodeGSImage bs of
     Left _ -> putStr "Failed"
     Right i -> do
-      let rows = scaleDoubleSix (f i) (desiredWidthToCount (2*12))
+      let rows = scaleDoubleSix (f i) (desiredWidthToCount sz)
           folderName = "out/" ++ outFolder
           ds = generateDoubleSixLayout rows
       createDirectoryIfMissing True folderName
@@ -42,7 +46,8 @@ testGeneration inFile outFolder f = do
       writeFile (folderName ++ "/stats.txt")
           ((encodeUtf8 . pack . prettyShow . getStats) rows)
 
-testStuff :: FilePath -> IO ()
+{-
+teststuff :: FilePath -> IO ()
 testStuff inFile = do
   bs <- readFile inFile
   case decodeGSImage bs of
@@ -57,14 +62,14 @@ testStuff inFile = do
       putStrLn $ "min pixel : " ++ tshow pMin
       forM_ allCounts $ \(v, c) ->
         putStrLn $ tshow v ++ "s : " ++ tshow c
+-}
 
 scaleDoubleSix :: Image Pixel8 -> Int -> [[DoubleSix]]
-scaleDoubleSix img chsWide =
+scaleDoubleSix img domsWide =
     -- TODO : This is janky
     take (length rows - 1) rows
   where
-    rows = quadAsciify' img chsWide quadMapping
-    --scaleAsciify' img chsWide scaleMapping
+    rows = quadAsciify' img domsWide quadMapping
 
 generateDoubleSixLayout :: [[DoubleSix]] -> Image Pixel8
 generateDoubleSixLayout rows =
@@ -187,12 +192,80 @@ flatDialate k img = generateImage f (imageWidth img) (imageHeight img)
       | y >= imageHeight img = 0
       | otherwise            = pixelAt img x y
 
-sobelBinary :: Double -> Image Pixel8 -> Image Pixel8
+sobelBinary :: Double -- ^ (0,1)
+            -> Image Pixel8
+            -> Image Pixel8
 sobelBinary tol img =
-  pixelMap (\p -> if fromIntegral p / 255 > tol
+  pixelMap (\p -> if fromIntegral p / 255 < tol
                   then 255
                   else 0
            ) (sobel img)
+
+colorRegions :: Int -- ^ Max regions
+             -> Image Pixel8 -- ^ Should be binary image
+             -> Image Pixel8
+colorRegions maxRegions img = generateImage f w h
+  where
+    regions = removeSmallRegions maxRegions $ findRegions img
+    mx = Vec.maximum regions
+    w = imageWidth img
+    h = imageHeight img
+    f x y = if mx == 0 then 0 else
+      fromIntegral $ (255 * (regions Vec.! (y*w + x))) `div` mx
+
+removeSmallRegions :: Int -> Vec.Vector Int -> Vec.Vector Int
+removeSmallRegions maxRegions regions =
+    if length elements <= maxRegions
+      then regions
+      else removeSmall
+  where
+    counts = foldl' (\mp p -> Map.insertWith (+) p 1 mp) Map.empty regions
+    elements = Map.assocs counts
+    regionsLeft =   Map.fromList
+                  . take maxRegions
+                  . sortBy (\(_,a) (_,b) -> compare b a)
+                  $ elements
+    mapping = Map.fromList $ zip (Map.keys regionsLeft) [1..]
+    removeSmall = map (\v -> case Map.lookup v mapping of
+                               Nothing -> 0
+                               Just newValue  -> newValue
+                      ) regions
+
+findRegions :: Image Pixel8 -- ^ Show be either 255 or 0
+            -> Vec.Vector Int
+findRegions img = go (Vec.replicate (w*h) 0) 1 (0,0)
+  where
+-- https://en.wikipedia.org/wiki/Connected-component_labeling#One_component_at_a_time
+    w = imageWidth img
+    h = imageHeight img
+    toIndex (x,y) = y*w + x
+    nextPixel (x,y) = if | x == w - 1 && y == h - 1 -> Nothing
+                         | x == w - 1 -> Just (0, y+1)
+                         | otherwise  -> Just (x+1, y)
+    go labels currLabel p@(x,y) =
+      if pixelAt img x y == 255 && labels Vec.! (toIndex p) == 0
+        then
+             let new = doNeighbors (labels Vec.// [(toIndex p, currLabel)]) currLabel p
+             in case nextPixel p of
+                  Nothing -> new
+                  Just np -> go new (currLabel+1) np
+        else case nextPixel p of
+               Nothing -> labels
+               Just np -> go labels currLabel np
+    doNeighbors labels currLabel p@(x,y) =
+      let ns = neighbors x y
+      in foldl' (\lbls neighbor@(i,j) ->
+                   if pixelAt img i j == 255 && lbls Vec.! (toIndex neighbor) == 0
+                     then doNeighbors (lbls Vec.// [(toIndex neighbor, currLabel)])
+                                      currLabel neighbor
+                     else lbls
+                ) labels ns
+    neighbors i j = filter (\(x,y) -> x >= 0 && x < w && y >= 0 && y < h &&
+                                      not (x == i && y == j))
+                           [ (i',j')
+                           | i' <- [i-1,i,i+1]
+                           , j' <- [j-1,j,j+1]
+                           ]
 
 sobel :: Image Pixel8 -> Image Pixel8
 sobel image = clampFloatImage $ generateImage
@@ -236,6 +309,13 @@ sobelY = convolution kernal
       (1, 2, 1)
       (0, 0, 0)
       (-1, -2, -1)
+
+testStuff :: String -> (Image Pixel8 -> a) -> IO a
+testStuff inFile f = do
+  bs <- readFile inFile
+  case decodeGSImage bs of
+    Left _ -> error "failed"
+    Right i -> return (f i)
 
 testAlg :: String -> String -> (Image Pixel8 -> Image Pixel8) -> IO ()
 testAlg inFile outFile f = do

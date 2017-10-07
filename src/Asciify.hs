@@ -94,7 +94,8 @@ novemAsciify :: Image Pixel8 -> Int -> String
 novemAsciify img chsWide = asciifyCells $ novemAsciify' img chsWide nShapeToAscii
 
 novemAsciify' :: Image Pixel8 -> Int -> (Novemant -> a) -> [[a]]
-novemAsciify' img chsWide f = runner img chsWide (\i tl br -> f (novShape $ nShape i tl br))
+novemAsciify' img chsWide f =
+  runner img chsWide (\i tl br -> f (novShape $ nShape i tl br))
 
 quadAsciify :: Image Pixel8 -> Int -> String
 quadAsciify img chsWide = asciifyCells $ quadAsciify' img chsWide shapeToAscii
