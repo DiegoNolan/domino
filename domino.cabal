@@ -34,6 +34,7 @@ Executable domino
                 mtl,
                 postgresql-simple,
                 pretty,
+                repa,
                 resourcet,
                 servant >= 0.7,
                 servant-lucid,

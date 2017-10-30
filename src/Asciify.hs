@@ -4,7 +4,9 @@
              OverloadedStrings #-}
 module Asciify
  ( loadGSImage
+ , linearCombinationInRect
  , decodeGSImage
+ , decodeRGBImage
  , decodeHSVImage
  , novemAsciify
  , novemAsciify'
@@ -13,6 +15,7 @@ module Asciify
  , scaleAsciify
  , scaleAsciify'
  , testAllAlgorithms
+ , makeGrid
  , asciifyCells
  , normPixels
  , meanInRect
@@ -53,21 +56,21 @@ data Novemant = Novemant !Brightness !Brightness !Brightness
 asciifyCells :: [String] -> String
 asciifyCells = intercalate "\n"
 
-widthToHeight:: Rational
-widthToHeight = 2
-
 decodeGSImage :: ByteString -> Either String (Image Pixel8)
 decodeGSImage bs = grayscaleImage <$> decodeImage bs
 
 decodeHSVImage :: ByteString -> Either String (Image Pixel8)
 decodeHSVImage bs = hsvJustV <$> decodeImage bs
 
+decodeRGBImage :: ByteString -> Either String (Image PixelRGB8)
+decodeRGBImage bs = convertRGB8 <$> decodeImage bs
+
 loadGSImage :: String -> IO (Either String (Image Pixel8))
 loadGSImage fname = do
    dy <- readImage fname
    return $ grayscaleImage <$> dy
 
--- Run All examples in terminal
+-- run All examples in terminal
 testAllAlgorithms :: String -> Int -> IO ()
 testAllAlgorithms fname w = do
   img' <- loadGSImage fname
@@ -75,39 +78,46 @@ testAllAlgorithms fname w = do
     Right image -> do
       let img = normPixels image
 
-      putStr $ pack (novemAsciify img w)
+      putStr $ pack (novemAsciify img 2 w)
 
-      putStr $ pack (quadAsciify img w)
+      putStr $ pack (quadAsciify img 2 w)
 
-      putStr $ pack (scaleAsciify img w)
+      putStr $ pack (scaleAsciify img 2 w)
     Left er  -> putStr $ pack er
 
-runner :: Image Pixel8 -> Int -> (Image Pixel8 -> RCord -> RCord -> a) -> [[a]]
-runner img chsWide f = reverse $ foldl' (\acc j -> row j : acc) [] [0..chsHigh]
-  where dim@(x,y) = charDims img chsWide
-         -- used to be ceiling, unsure which one it should be
-        chsHigh = floor ((fromIntegral (imageHeight img)) / snd dim ) :: Int
-        row c = map (runCell c) [0..chsWide-1]
-        runCell c i = f img (fromIntegral i * x , fromIntegral c * y) dim
+makeGrid :: Image pix -> Rational -> Int -> (Image pix -> RCord -> RCord -> a) -> [[a]]
+makeGrid img widthToHeight chsWide f =
+    reverse $ foldl' (\acc j -> row j : acc) [] [0..chsHigh]
+  where
+    dim@(x,y) = charDims img widthToHeight chsWide
+    -- used to be ceiling, unsure which one it should be
+    chsHigh = floor ((fromIntegral (imageHeight img)) / snd dim ) :: Int
+    row c = map (runCell c) [0..chsWide-1]
+    runCell c i = f img (fromIntegral i * x , fromIntegral c * y) dim
 
-novemAsciify :: Image Pixel8 -> Int -> String
-novemAsciify img chsWide = asciifyCells $ novemAsciify' img chsWide nShapeToAscii
+novemAsciify :: Image Pixel8 -> Rational -> Int -> String
+novemAsciify img widthToHeight chsWide =
+  asciifyCells $ novemAsciify' img widthToHeight chsWide nShapeToAscii
 
-novemAsciify' :: Image Pixel8 -> Int -> (Novemant -> a) -> [[a]]
-novemAsciify' img chsWide f =
-  runner img chsWide (\i tl br -> f (novShape $ nShape i tl br))
+novemAsciify' :: Image Pixel8 -> Rational -> Int -> (Novemant -> a) -> [[a]]
+novemAsciify' img widthToHeight chsWide f =
+  makeGrid img widthToHeight chsWide (\i tl br -> f (novShape $ nShape i tl br))
 
-quadAsciify :: Image Pixel8 -> Int -> String
-quadAsciify img chsWide = asciifyCells $ quadAsciify' img chsWide shapeToAscii
+quadAsciify :: Image Pixel8 -> Rational -> Int -> String
+quadAsciify img widthToHeight chsWide =
+  asciifyCells $ quadAsciify' img widthToHeight chsWide shapeToAscii
 
-quadAsciify' :: Image Pixel8 -> Int -> (CharShape -> a) -> [[a]]
-quadAsciify' img chsWide f = runner img chsWide (\i tl br -> f (shape i tl br))
+quadAsciify' :: Image Pixel8 -> Rational -> Int -> (CharShape -> a) -> [[a]]
+quadAsciify' img widthToHeight chsWide f =
+  makeGrid img widthToHeight chsWide (\i tl br -> f (shape i tl br))
 
-scaleAsciify :: Image Pixel8 -> Int -> String
-scaleAsciify img chsWide = asciifyCells $ scaleAsciify' img chsWide asciiReplace
+scaleAsciify :: Image Pixel8 -> Rational -> Int -> String
+scaleAsciify img widthToHeight chsWide =
+  asciifyCells $ scaleAsciify' img widthToHeight chsWide asciiReplace
 
-scaleAsciify' :: Image Pixel8 -> Int -> (Word8 -> a) -> [[a]]
-scaleAsciify' img chsWide f = runner img chsWide (\i tl br -> f (meanInRect i tl br))
+scaleAsciify' :: Image Pixel8 -> Rational -> Int -> (Word8 -> a) -> [[a]]
+scaleAsciify' img widthToHeight chsWide f =
+  makeGrid img widthToHeight chsWide (\i tl br -> f (meanInRect i tl br))
 
 -- Normalize the grayscale image so the darkest pixel is zero and the
 -- brightest is 255
@@ -154,27 +164,39 @@ nShape img (ox,oy) dim = NovemShape
         td@(tdx,tdy) = ( fst dim / 3, snd dim /3 )
 
 -- Returns the dimensions of a character in pixels
-charDims :: Image Pixel8
+charDims :: Image pix
+         -> Rational
          -> Int -- ^ How many characters wide the ascii plans to be
          -> RCord -- ^ Width x Height
-charDims img charsWide = (xdim, xdim/widthToHeight)
+charDims img widthToHeight charsWide = (xdim, xdim/widthToHeight)
    where w = (fromIntegral . imageWidth) img :: Rational
          xdim = w / (fromIntegral charsWide)
 
 -- Returns the mean weighted pixel value in a rectangle of a grayscale image
-meanInRect :: (Image Pixel8) -> RCord -> RCord -> Word8
-meanInRect img (x,y) (xd,yd) = floor $ weightedMean valAndWgt
-   where maxX = (imageWidth img) - 1
-         maxY = (imageHeight img) - 1
-         inds = [ (i,j) | i <- xinds, j <- yinds]
-         xinds = [floor x..min (floor (x+xd)) maxX ]
-         yinds = [floor y..min (floor (y+yd)) maxY ]
-         area xi yi = ( x2 xi - x1 xi ) * ( y2 yi - y1 yi )
-         x1 xi = max (fromIntegral xi) x
-         x2 xi = min (fromIntegral (xi+1)) (x+xd)
-         y1 yi = max (fromIntegral yi) y
-         y2 yi = min (fromIntegral (yi+1)) (y+yd)
-         valAndWgt = map (\(a,b) -> (pixelAt img a b,area a b)) inds
+meanInRect :: Image Pixel8 -> RCord -> RCord -> Word8
+meanInRect img topLeft diff =
+  floor $ linearCombinationInRect img topLeft diff weightedMean
+
+linearCombinationInRect :: Pixel a
+                        => Image a
+                        -> RCord
+                        -> RCord
+                        -> ([(a,Rational)] -> b)
+                        -> b
+linearCombinationInRect img (x,y) (xd,yd) func = func valAndWgt
+   where
+     maxX = (imageWidth img) - 1
+     maxY = (imageHeight img) - 1
+     inds = [ (i,j) | i <- xinds, j <- yinds]
+     xinds = [floor x..min (floor (x+xd)) maxX ]
+     yinds = [floor y..min (floor (y+yd)) maxY ]
+     area xi yi = ( x2 xi - x1 xi ) * ( y2 yi - y1 yi )
+     x1 xi = max (fromIntegral xi) x
+     x2 xi = min (fromIntegral (xi+1)) (x+xd)
+     y1 yi = max (fromIntegral yi) y
+     y2 yi = min (fromIntegral (yi+1)) (y+yd)
+     valAndWgt = map (\(a,b) -> (pixelAt img a b,area a b)) inds
+
 
 -- Convert a dynamic image to grayscale of its image
 grayscaleImage :: DynamicImage -> Image Pixel8
