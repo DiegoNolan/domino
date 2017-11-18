@@ -23,6 +23,7 @@ instance ToHtml IndexPage where
     masterPage $ do
       div_ [ id_ "create" ] ""
       script_ [ src_ "/js/create.js" ] ""
+  toHtmlRaw = toHtml
 
 type Api =
        "newImage" :> QueryParam "url" Text :> Post '[JSON] Int

@@ -12,6 +12,7 @@ import qualified Asciify as A
 import Codec.Picture
 import Data.List ((!!), tails)
 import Data.Maybe (fromJust)
+import qualified Data.Map.Strict as M
 import qualified Data.Set as Set
 import qualified Data.Vector as V
 import Image.Generation
@@ -52,37 +53,90 @@ data Options a = Options
   , optsPenalty :: Integer
   }
 
-greedy :: Puzzle PixelRGB8 -> Maybe (Puzzle (Cell PixelRGB8))
-greedy act@(Puzzle c w) =
-    fullPuzzle =<< headMay
-    (go emptyPuzzle (Set.fromList [0..len-1])
-    (sortOptions $ greedyOptions act emptyPuzzle)
-    )
+greedy :: String -> Puzzle PixelRGB8 -> IO (Maybe (Puzzle (Cell PixelRGB8)))
+greedy folderName act@(Puzzle c w) = do
+    ref <- newIORef 0
+    let go :: Puzzle (Maybe (Cell PixelRGB8)) -- The puzle state
+           -> Set.Set Int -- set of indicies that are empty
+           -> [Options PixelRGB8] -- Possible options available
+           -> IO [Puzzle (Maybe (Cell PixelRGB8))]
+        go st toFill opts = do
+          modifyIORef ref (+1)
+          num <- readIORef ref
+          -- let img = generateFromMaybeGrid (map (map (fmap value)) (asGrid st))
+          -- writePng (folderName ++ "/" ++ show num ++ ".png") img
+          let valid = eachCellHasOneValidOption st opts
+          -- contigSets = allContiguousSets st
+              optSet = optionsIndicies opts
+              onlyOne = findCellsWithOnlyOneOption opts
+          if | null opts && valid -> return [st]
+             | not (toFill `Set.isSubsetOf` optSet) -> do
+                putStrLn $ "indicies left : " ++ tshow (length toFill)
+                return []
+            -- | any (\s -> odd (Set.size s)) contigSets ->
+            --   trace ("odd set ") []
+             | not (null onlyOne) -> do
+                 go (applyOptions st onlyOne)
+                    (deleteOptions toFill onlyOne)
+                    (foldl' (\remain o -> filterConflictingOpts o remain) opts onlyOne)
+             | otherwise -> do
+                let loop :: [[Options PixelRGB8]]
+                         -> IO [Puzzle (Maybe (Cell PixelRGB8))]
+                    loop [] = return []
+                    loop (curr:rest) = do
+                      res <- case curr of
+                               (o:nOpts) -> go (applyOption st o)
+                                            (deleteOption toFill o)
+                                            (filterConflictingOpts o nOpts)
+                               _ -> return []
+                      if null res
+                        then loop rest
+                        else return res
+                loop (tails opts)
+    results <- go emptyPuzzle (Set.fromList [0..len-1])
+        (sortOptions $ allOptions act)
+    return $ fullPuzzle =<< headMay results
   where
     emptyPuzzle = Puzzle (V.replicate len Nothing) w
     len = V.length c
-    go :: Puzzle (Maybe (Cell PixelRGB8))
-       -> Set.Set Int
-       -> [Options PixelRGB8]
-       -> [Puzzle (Maybe (Cell PixelRGB8))]
-    go st toFill opts =
-      let valid = eachCellHasOneValidOption st opts
-          optSet = optionsIndicies opts
-      in if | null opts && valid -> [st]
-            | not (toFill `Set.isSubsetOf` optSet) ->
-                trace ("indicies left : " ++ show (length toFill)) []
-            | otherwise ->
-                concatMap
-                  (\case
-                       (o:nOpts) -> go (applyOption st o)
-                                       (deleteOption toFill o)
-                                       (filterConflictingOpts o nOpts)
-                       _ -> []
-                  ) (tails opts)
+
+allContiguousSets :: Puzzle (Maybe a) -> [Set.Set Int]
+allContiguousSets puzz@(Puzzle c w) = go [] 0
+  where
+    go :: [Set.Set Int]
+       -> Int
+       -> [Set.Set Int]
+    go prevSets i
+      | i >= V.length c = prevSets
+      | any (i `Set.member`) prevSets = go prevSets (i+1)
+      | isNothing (c V.! i) = go prevSets (i+1)
+      | otherwise = go (fanOut Set.empty i : prevSets) (i+1)
+    fanOut :: Set.Set Int -> Int -> Set.Set Int
+    fanOut currSet i
+      | i >= V.length c = currSet
+      | i `Set.member` currSet = currSet
+      | isNothing (c V.! i) = currSet
+      | otherwise =
+        Set.unions $ map (fanOut (Set.insert i currSet)) (adjacent puzz i)
+
+adjacent :: Puzzle a -> Int -> [Int]
+adjacent (Puzzle c w) i
+    | i < 0 = []
+    | i >= V.length c = []
+    | otherwise =
+           (if i >= w then [i - w] else [])
+        ++ (if i `div` w < h -1 then [i + w] else [])
+        ++ (if i `rem` w /= 0 then [i - 1] else [])
+        ++ (if i `rem` w /= w - 1 then [i + 1] else [])
+  where
+    h = V.length c `div` w
 
 deleteOption :: Set.Set Int -> Options a -> Set.Set Int
 deleteOption set (Options o1 o2 _) =
   Set.delete (opIdx o2) $ Set.delete (opIdx o1) set
+
+deleteOptions ::Set.Set Int -> [Options a] -> Set.Set Int
+deleteOptions set opts = foldl' deleteOption set opts
 
 filterConflictingOpts :: Options a -> [Options a] -> [Options a]
 filterConflictingOpts (Options (Option i1 _) (Option i2 _) _) opts =
@@ -104,6 +158,11 @@ applyOption :: Puzzle (Maybe (Cell PixelRGB8))
             -> Puzzle (Maybe (Cell PixelRGB8))
 applyOption (Puzzle c w) (Options (Option i1 c1) (Option i2 c2) _) =
   Puzzle (c V.// [(i1, Just c1), (i2, Just c2)]) w
+
+applyOptions :: Puzzle (Maybe (Cell PixelRGB8))
+             -> [Options PixelRGB8]
+             -> Puzzle (Maybe (Cell PixelRGB8))
+applyOptions puzz opts = foldl' applyOption puzz opts
 
 fullPuzzle :: Puzzle (Maybe (Cell PixelRGB8)) -> Maybe (Puzzle (Cell PixelRGB8))
 fullPuzzle (Puzzle c w) =
@@ -139,44 +198,47 @@ indicesLeft (Puzzle c _) = Set.fromList $
                  Just _ -> acc
             ) [] c
 
-greedyOptions :: Puzzle PixelRGB8
-              -> Puzzle (Maybe (Cell PixelRGB8))
-              -> [Options PixelRGB8]
-greedyOptions (Puzzle act _) (Puzzle c w) =
-    V.ifoldl' (\os idx currCell ->
-                let h = V.length c `div` w
+{-
+greedy2 :: Puzzle PixelRGB8 -> Maybe (Puzzle (Cell PixelRGB8))
+greedy2 (Puzzle c w) =
+  where
+    emptyPuzzle = Puzzle (V.replicate len Nothing) w
+    len = V.length c
+    opts = allOptions puzz
+    go :: Puzzle (Maybe (Cell PixelRGB8))
+       -> [Options PixelRGB8]
+       -> Puzzle (Maybe (Cell PixelRGB8))
+    go st opts =
+-}
+
+allOptions :: Puzzle PixelRGB8 -> [Options PixelRGB8]
+allOptions (Puzzle act w) =
+    V.ifoldl' (\os idx _ ->
+                let h = V.length act `div` w
                     onRight = (idx + 1) `rem` w == 0
                     onBottom = idx `div` w >= h - 1
-                in case currCell of
-                     Nothing ->
-                       (
-                       if onRight then [] else
-                       case c V.! (idx+1) of
-                         Just _ -> []
-                         Nothing ->
-                           let l = act V.! (idx+1)
-                               r = act V.! idx
-                               (v, p) = findNearestOfTwo l r
-                           in [ Options
-                                  { optsOne =
-                                      Option
-                                        { opIdx = idx
-                                        , opCell = Cell R v
-                                        }
-                                  , optsTwo =
-                                      Option
-                                        { opIdx = idx+1
-                                        , opCell = Cell L v
-                                        }
-                                  , optsPenalty = p
-                                  }
-                              ]
-                       ) ++
-                       (
+                in (
+                   if onRight then [] else
+                       let l = act V.! (idx+1)
+                           r = act V.! idx
+                           (v, p) = findNearestOfTwo l r
+                       in [ Options
+                              { optsOne =
+                                  Option
+                                    { opIdx = idx
+                                    , opCell = Cell R v
+                                    }
+                              , optsTwo =
+                                  Option
+                                    { opIdx = idx+1
+                                    , opCell = Cell L v
+                                    }
+                              , optsPenalty = p
+                              }
+                          ]
+                   ) ++
+                   (
                        if onBottom then [] else
-                       case c V.! (idx+w) of
-                         Just _ -> []
-                         Nothing ->
                            let t = act V.! idx
                                b = act V.! (idx+w)
                                (v, p) = findNearestOfTwo t b
@@ -195,8 +257,7 @@ greedyOptions (Puzzle act _) (Puzzle c w) =
                                   }
                               ]
                        ) ++ os
-                     Just _ -> os
-              ) [] c
+              ) [] act
 
 
 fromRows :: [[a]] -> Maybe (Puzzle a)
@@ -322,14 +383,27 @@ testColors inFile outFolder = do
   case A.decodeRGBImage bs of
     Left _ -> putStrLn "Failed"
     Right i -> do
-      case greedy =<< fromRows (meanColors i 16) of
+      case fromRows (meanColors i 50) of
         Nothing -> putStrLn "Could not make puzzle"
         Just puzz -> do
-          let grid = asGrid puzz
-              folderName = "out/" ++ outFolder
-              outImg = generateFromGrid (map (map value) grid)
+          let folderName = "out/" ++ outFolder
           createDirectoryIfMissing True folderName
-          writePng (folderName ++ "/replica.png") outImg
+          result <- greedy folderName puzz
+          case result of
+            Nothing -> putStrLn "greedy failed"
+            Just pResult -> do
+              let grid = asGrid pResult
+                  outImg = generateFromGrid (map (map value) grid)
+              writePng (folderName ++ "/replica.png") outImg
+
+findCellsWithOnlyOneOption :: [Options a] -> [Options a]
+findCellsWithOnlyOneOption opts =
+      concat . M.elems . M.filter (\os -> length os == 1) $ optMap
+  where
+    optMap = foldl' (\m o ->   M.insertWith (++) (opIdx (optsTwo o)) [o]
+                             . M.insertWith (++) (opIdx (optsOne o)) [o]
+                             $ m
+                    ) M.empty opts
 
 miniDominoColors :: [PixelRGB8]
 miniDominoColors =
@@ -423,3 +497,4 @@ meanColors img width =
       , den + wgt
       )
     toPixel (r,g,b) = PixelRGB8 (round r) (round g) (round b)
+

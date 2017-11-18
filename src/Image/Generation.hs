@@ -6,6 +6,7 @@
 module Image.Generation
   ( generateDoubleSixLayout
   , generateFromGrid
+  , generateFromMaybeGrid
   ) where
 
 import ClassyPrelude
@@ -18,6 +19,14 @@ generateFromGrid :: Pixel a => [[a]] -> Image a
 generateFromGrid rows =
   generateImage (\i j -> (rows !! j) !! i)
   (length $ headEx rows) (length rows)
+
+generateFromMaybeGrid :: [[Maybe PixelRGB8]] -> Image PixelRGB8
+generateFromMaybeGrid rows =
+  generateImage
+  (\i j -> case (rows !! j) !! i of
+             Nothing -> PixelRGB8 255 255 255
+             Just p -> p
+  ) (length $ headEx rows) (length rows)
 
 {-
 generatePuzzle :: Pixal a => Puzzle a -> Image a
